@@ -36,6 +36,7 @@ class Crawler:
     # HTTP client
     _client: httpx.AsyncClient = field(init=False, repr=False)
     normalized_origin_url: str = field(init=False)
+    origin_domain: str = field(init=False)  # <<< ADDED
 
     async def __aenter__(self):
         """Initializes the async HTTP client."""
@@ -52,6 +53,7 @@ class Crawler:
             headers=headers,
         )
         self.normalized_origin_url = self._normalize_url(self.origin_url)
+        self.origin_domain = urlparse(self.normalized_origin_url).netloc  # <<< ADDED
 
         # Initialize the queue: either with seed URLs or the origin URL
         if self.seed_urls:
@@ -187,6 +189,14 @@ class Crawler:
 
             link_url = urljoin(current_url, a_tag["href"])
             normalized_link = self._normalize_url(link_url)
+
+            # <<< MODIFIED BLOCK START
+            # Do not investigate links on the same domain as the origin.
+            link_domain = urlparse(normalized_link).netloc
+            if link_domain == self.origin_domain:
+                log.info(f"Skipping link to same origin domain: {normalized_link}")
+                continue
+            # <<< MODIFIED BLOCK END
 
             # Avoid re-queueing links we've already seen
             if normalized_link not in self.visited_urls and not any(q[0] == normalized_link for q in self.queue):
