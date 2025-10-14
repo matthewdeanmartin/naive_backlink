@@ -1,0 +1,61 @@
+[project]
+name = "naive_backlink"
+version = "0.1.0"
+description = "A naive backlink checker for non-cryptographic identity linking, based on the PEP."
+authors = [{ name = "Matthew D. Martin", email = "matthewdeanmartin@users.noreply.github.com" }]
+requires-python = ">=3.8"
+dependencies = [
+    "httpx",
+    "beautifulsoup4",
+    "lxml",
+    # todo: move
+    "pytest",
+    "pytest_httpx",
+    "playwright>=1.40.0"
+
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest",
+    "pytest-httpx",
+]
+
+[project.scripts]
+naive_backlink = "naive_backlink.cli:main"
+
+[tool.naive_backlink]
+# Default configuration as specified in the PEP
+max_hops = 3
+max_redirects = 5
+max_outlinks = 50
+timeout = 5.0 # seconds
+max_content_bytes = 1048576 # 1 MiB
+user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36"
+
+# Default trusted and blacklisted domains
+trusted = [
+    "*.social",
+    "github.com",
+    "gitlab.com",
+    "bitbucket.org",
+    "twitter.com",
+    "x.com",
+    "bsky.app",
+    "linkedin.com",
+]
+blacklist = [
+    "google.com",
+    "bing.com",
+    "duckduckgo.com",
+    "libraries.io",
+    "grep.app",
+    "sourcegraph.com",
+    "pastebin.com",
+    "bit.ly",
+    "t.co",
+    "tinyurl.com",
+]
+
+[tool.uv]
+package = true
