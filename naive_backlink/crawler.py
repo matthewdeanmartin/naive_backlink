@@ -1,27 +1,62 @@
+# naive_backlink/crawler.py
 from __future__ import annotations
+
+"""
+HTTPX-based crawler.
+
+Responsibilities:
+- Fetch HTML over HTTP(S) with redirects and timeouts.
+- Maintain BFS queue with hop limits and visited set.
+- Delegate ALL link parsing, normalization, backlink detection, and
+  same-domain filtering to link_logic.py.
+
+Centralized behaviors (in link_logic.py):
+- Handling of <a href=...> and <link href=...>
+- URL normalization
+- Same-domain policies: "follow", "no-self-domain", "no-self-domain-or-subdomain"
+- Backlink detection (including rel="me" classification)
+- Evidence construction
+"""
 
 import logging
 from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Deque, Dict, List, Set
-from urllib.parse import urljoin, urlparse
 
 import httpx
-from bs4 import BeautifulSoup, Tag
+from bs4 import BeautifulSoup
 
+from .models import EvidenceRecord
+from .link_logic import (
+    LogicConfig,
+    extract_href_elements,
+    normalize_url,
+    queue_candidates_from_origin,
+    queue_candidates_from_pivot,
+    detect_backlink_element,
+    make_evidence,
+    make_indirect_evidence,
+    is_fetchable_url, is_probably_html_url, is_blacklisted,
+)
 
-from naive_backlink.models import EvidenceRecord, LinkDetails, URLContext
-
-# Get a logger for this module. The level will be configured in the CLI.
 log = logging.getLogger(__name__)
 
 
 @dataclass
 class Crawler:
     """
-    Manages the crawling process to find backlinks using httpx.
-    """
+    Crawl starting from an origin URL using httpx (no JS execution).
 
+    Config keys consumed:
+      - user_agent: str
+      - timeout: float (seconds)
+      - max_content_bytes: int
+      - max_hops: int
+      - max_outlinks: int
+      - trusted: list[str]
+      - same_domain_policy: "follow" | "no-self-domain" | "no-self-domain-or-subdomain"
+      - use_registrable_domain: bool
+    """
     origin_url: str
     config: Dict[str, Any]
     seed_urls: List[str] | None = None
@@ -33,18 +68,21 @@ class Crawler:
     evidence: List[EvidenceRecord] = field(default_factory=list)
     errors: List[str] = field(default_factory=list)
 
-    # HTTP client
+    # second-degree tracking
+    parent: Dict[str, str] = field(default_factory=dict)  # neighbor C -> pivot B
+    pivot_has_backlink_to_origin: Set[str] = field(default_factory=set)  # B that link to A
+    pivot_outlinked: Dict[str, Set[str]] = field(default_factory=dict)  # B -> {C}
+
+    # HTTP client + derived
     _client: httpx.AsyncClient = field(init=False, repr=False)
     normalized_origin_url: str = field(init=False)
-    origin_domain: str = field(init=False)  # <<< ADDED
 
-    async def __aenter__(self):
-        """Initializes the async HTTP client."""
-        log.info("Starting httpx session...")
+    async def __aenter__(self) -> "Crawler":
         headers = {
             "User-Agent": self.config.get(
                 "user_agent",
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/107.0.0.0 Safari/537.36",
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/107.0.0.0 Safari/537.36",
             )
         }
         self._client = httpx.AsyncClient(
@@ -52,211 +90,190 @@ class Crawler:
             timeout=self.config.get("timeout", 10.0),
             headers=headers,
         )
-        self.normalized_origin_url = self._normalize_url(self.origin_url)
-        self.origin_domain = urlparse(self.normalized_origin_url).netloc  # <<< ADDED
 
-        # Initialize the queue: either with seed URLs or the origin URL
+        self.normalized_origin_url = normalize_url(self.origin_url)
+
+        # Initialize BFS queue
         if self.seed_urls:
-            log.info("Initializing queue with %d provided seed URLs.", len(self.seed_urls))
+            # Treat provided seeds as first-hop candidates
             self.visited_urls.add(self.normalized_origin_url)
             for url in self.seed_urls:
-                # These are candidates for the first hop
-                self.queue.append((self._normalize_url(url), 1))
+                self.queue.append((normalize_url(url), 1))
         else:
-            log.info("No seed URLs provided. Initializing queue with origin: %s", self.normalized_origin_url)
+            # Start at the origin page
             self.queue.append((self.normalized_origin_url, 0))
+
+        log.info("httpx session initialized. Origin: %s", self.normalized_origin_url)
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Closes the async HTTP client."""
-        log.info("Closing httpx session.")
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
         await self._client.aclose()
-
-
-    def _normalize_url(self, url: str) -> str:
-        """
-        Normalizes a URL for consistent processing.
-        - Lowercases scheme and netloc.
-        - Strips fragment.
-        - Strips trailing slash from path unless it's the root.
-        """
-        try:
-            parsed = urlparse(url)
-            path = parsed.path
-            if path.endswith('/') and len(path) > 1:
-                path = path[:-1]
-
-            return parsed._replace(
-                scheme=parsed.scheme.lower(),
-                netloc=parsed.netloc.lower(),
-                path=path,
-                fragment="",
-            ).geturl()
-        except Exception:
-            # Fallback for malformed URLs
-            return url
+        log.info("httpx session closed.")
 
     async def _fetch_and_parse(self, url: str) -> BeautifulSoup | None:
-        """Fetches a URL and parses it into a BeautifulSoup object with logging."""
-        if url in self.visited_urls:
-            log.info(f"Skipping already visited URL: {url}")
+        """
+        Fetch a URL and return a BeautifulSoup tree, or None on error/non-HTML/too-large.
+        """
+        if not is_fetchable_url(url):
+            log.info("Skipping non-fetchable URL (scheme not http/https): %s", url)
             return None
 
-        log.info(f"Fetching: {url}")
+        if not is_probably_html_url(url):
+            log.info("Skip non-HTML by extension: %s", url)
+            return None
+        if url in self.visited_urls:
+            return None
         self.visited_urls.add(url)
 
         try:
-            response = await self._client.get(url)
-            log.info(f"Received status {response.status_code} for {url}")
+            resp = await self._client.get(url)
+            status = resp.status_code
 
-            if response.status_code != 200:
-                log.warning(f"URL returned non-200 status: {response.status_code}")
+            if status != 200:
+                # Still raise_for_status for uniform handling of 4xx/5xx
+                log.warning("Non-200 response for %s: %d", url, status)
+            resp.raise_for_status()
 
-            response.raise_for_status()  # Raise an exception for 4xx/5xx statuses
-
-            # Log the beginning of the page content for debugging purposes.
-            log.debug(f"--- Page content start for {url} ---\n"
-                      f"{response.text}...\n"
-                      f"--- Page content end ---")
-
-            content_type = response.headers.get("content-type", "").lower()
-            if "text/html" not in content_type:
-                log.info(f"Skipping non-HTML content type '{content_type}' at {url}")
+            ctype = resp.headers.get("content-type", "").lower()
+            if "text/html" not in ctype:
+                log.info("Skipping non-HTML content at %s (%s)", url, ctype)
                 return None
 
-            if len(response.content) > self.config.get("max_content_bytes", 1024 * 1024):
-                log.warning(f"Content at {url} exceeds max size, skipping.")
-                self.errors.append(f"Content too large at {url}")
+            max_bytes = self.config.get("max_content_bytes", 1024 * 1024)
+            if len(resp.content) > max_bytes:
+                msg = f"Content too large at {url} ({len(resp.content)} > {max_bytes})"
+                log.warning(msg)
+                self.errors.append(msg)
                 return None
 
-            # Using the robust built-in html.parser to avoid dependency issues.
-            return BeautifulSoup(response.text, "html.parser")
+            return BeautifulSoup(resp.text, "html.parser")
 
         except httpx.HTTPStatusError as e:
-            error_msg = f"HTTP error for {url}: {e}"
-            log.error(error_msg)
-            # Log the response body at DEBUG level for troubleshooting.
-            log.debug(f"Response body for failed request to {url}:\n{e.response.text}")
-            self.errors.append(error_msg)
+            msg = f"HTTP error for {url}: {e}"
+            log.error(msg)
+            self.errors.append(msg)
             return None
         except httpx.RequestError as e:
-            error_msg = f"Network error fetching {url}: {e}"
-            log.error(error_msg)
-            self.errors.append(error_msg)
+            msg = f"Network error fetching {url}: {e}"
+            log.error(msg)
+            self.errors.append(msg)
             return None
         except Exception as e:
-            error_msg = f"Error parsing {url}: {e}"
-            log.error(error_msg)
-            self.errors.append(error_msg)
+            msg = f"Error parsing {url}: {e}"
+            log.error(msg)
+            self.errors.append(msg)
             return None
 
-    async def crawl(self):
-        """Starts the crawling process."""
+    async def crawl(self) -> None:
+        """
+        BFS crawl honoring hop limits. On origin page, enqueue outbound candidates.
+        On candidate pages, detect first backlink to origin and record evidence.
+        """
+        cfg = LogicConfig(
+            max_outlinks=self.config.get("max_outlinks", 50),
+            trusted_domains=self.config.get("trusted", []),
+            same_domain_policy=self.config.get("same_domain_policy", "no-self-domain"),
+            use_registrable_domain=self.config.get("use_registrable_domain", False),
+            blacklist_patterns=self.config.get("blacklist", []),
+        )
+
+        max_hops = self.config.get("max_hops", 3)
+
         while self.queue:
             current_url, hops = self.queue.popleft()
 
-            if hops >= self.config.get("max_hops", 3):
-                log.info(f"Max hops reached for path starting from {current_url}, stopping branch.")
+            # 🔒 Skip blacklisted before any network I/O
+            if is_blacklisted(current_url, cfg):
+                log.info("Skipping blacklisted URL: %s", current_url)
+                continue
+
+            if hops >= max_hops:
+                # Prune this branch; do not fetch/parse
                 continue
 
             soup = await self._fetch_and_parse(current_url)
             if not soup:
                 continue
 
-            all_links = soup.find_all("a", href=True)
-            log.info(f"Found {len(all_links)} link(s) on {current_url}.")
-
-
-            # Log every link found for verbose detail
-            for a_tag in all_links:
-                log.debug(f"  - Found link on {current_url}: {a_tag.get('href')}")
-
-            # --- Process links based on page type (Origin vs. Candidate) ---
+            elements = extract_href_elements(soup)
             is_origin_page = (current_url == self.normalized_origin_url)
 
             if is_origin_page:
-                self._process_origin_page_links(current_url, hops, all_links)
+                # A → B candidates
+                # Choose outbound candidates according to policy and limits
+                next_candidates = queue_candidates_from_origin(
+                    current_url=current_url,
+                    origin_url=self.normalized_origin_url,
+                    elements=elements,
+                    cfg=cfg,
+                    already_queued=(q[0] for q in self.queue),
+                    visited=self.visited_urls,
+                )
+                for url in next_candidates:
+                    self.queue.append((url, hops + 1))
             else:
-                self._process_candidate_page_links(current_url, hops, all_links)
+                # First: detect B → A (direct backlink). If present, record and mark pivot.
+                # Find first backlink to origin (supports <a> and <link>)
+                tag = detect_backlink_element(
+                    current_url=current_url,
+                    origin_url=self.normalized_origin_url,
+                    elements=elements,
+                )
+                if tag is not None:
+                    ev = make_evidence(
+                        source_url=current_url,
+                        origin_url=self.normalized_origin_url,
+                        hops=hops,
+                        tag=tag,
+                        cfg=cfg,
+                        ordinal=len(self.evidence) + 1,
+                    )
+                    self.evidence.append(ev)
+                    self.evidence_producing_urls.add(current_url)
+                    self.pivot_has_backlink_to_origin.add(current_url)
 
-    def _process_origin_page_links(self, current_url: str, hops: int, links: list[Tag]):
-        """On the origin page, find and queue outgoing candidate links."""
-        links_queued = 0
-        for a_tag in links:
-            if links_queued >= self.config.get("max_outlinks", 50):
-                log.info(f"Max outlinks reached on origin page, stopping link processing.")
-                break
+                    # BUGFIX: Only queue a page's outlinks if it has a backlink to origin.
+                    # This prevents crawling unnecessary pages.
+                    next_neighbors = queue_candidates_from_pivot(
+                        current_url=current_url,
+                        pivot_url=current_url,
+                        origin_url=self.normalized_origin_url,
+                        elements=elements,
+                        cfg=cfg,
+                        already_queued=(q[0] for q in self.queue),
+                        visited=self.visited_urls,
+                    )
+                    if next_neighbors:
+                        self.pivot_outlinked.setdefault(current_url, set()).update(next_neighbors)
+                        for c in next_neighbors:
+                            # remember parent (C -> B)
+                            if c not in self.parent:
+                                self.parent[c] = current_url
+                            self.queue.append((c, hops + 1))
 
-            link_url = urljoin(current_url, a_tag["href"])
-            normalized_link = self._normalize_url(link_url)
-
-            # <<< MODIFIED BLOCK START
-            # Do not investigate links on the same domain as the origin.
-            link_domain = urlparse(normalized_link).netloc
-            if link_domain == self.origin_domain:
-                log.info(f"Skipping link to same origin domain: {normalized_link}")
-                continue
-            # <<< MODIFIED BLOCK END
-
-            # Avoid re-queueing links we've already seen
-            if normalized_link not in self.visited_urls and not any(q[0] == normalized_link for q in self.queue):
-                log.info(f"Queueing candidate for next hop: {normalized_link}")
-                self.queue.append((normalized_link, hops + 1))
-                links_queued += 1
-
-    def _process_candidate_page_links(self, current_url: str, hops: int, links: list[Tag]):
-        """On a candidate page, search for backlinks to the origin."""
-        backlinks_found_on_page = False
-        for a_tag in links:
-            backlink_url = urljoin(current_url, a_tag["href"])
-            normalized_backlink = self._normalize_url(backlink_url)
-
-            if normalized_backlink == self.normalized_origin_url:
-                # This is the first backlink we've found on this page.
-                log.warning(f"Found potential backlink from {current_url} to origin!")
-                self._create_evidence(current_url, a_tag, hops)
-                self.evidence_producing_urls.add(current_url)
-                backlinks_found_on_page = True
-                # Optimization: We only need one, so we can stop processing this page.
-                break
-
-        # Add warnings if no links or no backlinks were found.
-        if not links:
-            log.warning(f"No hyperlinks found at all on candidate page: {current_url}")
-        elif not backlinks_found_on_page:
-            log.warning(f"Found links, but no backlinks to origin on candidate page: {current_url}")
-
-    def _create_evidence(self, source_url: str, a_tag: Tag, hops: int):
-        """Creates an EvidenceRecord from a found backlink."""
-        rel_attr = a_tag.get("rel", [])
-        is_strong = "me" in rel_attr
-        classification = "strong" if is_strong else "weak"
-
-        source_domain = urlparse(source_url).netloc
-        trusted_domains = self.config.get("trusted", [])
-        is_trusted = any(d in source_domain for d in trusted_domains)
-
-        log.info(
-            f"Classifying backlink from {source_url} as '{classification}' "
-            f"(rel='{rel_attr}', trusted_surface={is_trusted})"
-        )
-
-        evidence = EvidenceRecord(
-            id=f"e-backlink-{len(self.evidence) + 1}",
-            kind="rel-me" if is_strong else "backlink",
-            source=URLContext(url=self.normalized_origin_url, context="origin-page"),
-            target=URLContext(url=source_url, context="candidate-page"),
-            link=LinkDetails(
-                html=str(a_tag),
-                rel=rel_attr,
-                nofollow="nofollow" in rel_attr,
-            ),
-            classification=classification,
-            hops=hops,
-            trusted_surface=is_trusted,
-        )
-        self.evidence.append(evidence)
+                # Third: if this page is a neighbor C (has a known parent B),
+                # verify mutuality C → B. If so AND B ↔ A exists, record INDIRECT.
+                if current_url in self.parent:
+                    pivot_url = self.parent[current_url]
+                    tag_to_pivot = detect_backlink_element(
+                        current_url=current_url,
+                        origin_url=pivot_url,
+                        elements=elements,
+                    )
+                    if tag_to_pivot is not None:
+                        # confirm B → C existed (we only queued C from B's outlinks)
+                        # and B ↔ A has been established
+                        if pivot_url in self.pivot_has_backlink_to_origin:
+                            ev_ind = make_indirect_evidence(
+                                origin_url=self.normalized_origin_url,
+                                pivot_url=pivot_url,
+                                neighbor_url=current_url,
+                                hops=hops,  # typically 2
+                                ordinal=len(self.evidence) + 1,
+                            )
+                            self.evidence.append(ev_ind)
+                            self.evidence_producing_urls.add(current_url)
 
     def get_results(self) -> tuple[List[EvidenceRecord], List[str]]:
-        """Returns the collected evidence and errors."""
+        """Return accumulated evidence and errors."""
         return self.evidence, self.errors

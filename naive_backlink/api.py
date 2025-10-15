@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import List
 
-from naive_backlink.models import Result
+from naive_backlink.models import Result, EvidenceRecord
 from naive_backlink.crawler import Crawler as HttpxCrawler
 from naive_backlink.playwright_crawler import Crawler as PlaywrightCrawler
 from naive_backlink.scoring import calculate_score
@@ -15,18 +15,74 @@ log = logging.getLogger(__name__)
 
 # Placeholder for a function to load configuration from pyproject.toml
 def _load_config() -> dict:
-    # In a real implementation, this would read and parse pyproject.toml
+    # Minimal, overridable defaults. Users can pass overrides via API/CLI.
     return {
         "max_hops": 3,
         "max_redirects": 5,
         "max_outlinks": 50,
         "timeout": 10.0,
-        "max_content_bytes": 1048576,
-        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36",
+        "max_content_bytes": 1_048_576,
+        "user_agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36"
+        ),
         "trusted": [],
-        "blacklist": [],
-    }
 
+        # 🔒 Wildcard denylist (fnmatch). Case-insensitive match on host and host+path.
+        # Examples:
+        #   "joinmastodon.org/*" blocks the apex
+        #   "*.joinmastodon.org/*" blocks all subdomains
+        #   "github.com/sponsors*" blocks that section but NOT user pages
+        "blacklist": [
+            # Everything under joinmastodon.org (and all its subdomains)
+            "joinmastodon.org/*",
+            "*.joinmastodon.org/*",
+
+            # GitHub “attractive nuisances” (keep real user/org pages)
+            "github.com/sponsors/*",
+            "github.com/trending/*",
+            "github.com/readme/*",
+            "github.com/topics/*",
+            "github.com/collections/*",
+            "github.com/partners/*",
+            "github.com/solutions",
+            "github.com/solutions/*",
+            "github.com/site",  # marketing/docs
+            "github.com/site/*",       # marketing/docs
+            "github.com/features",  # product marketing
+            "github.com/features/*",   # product marketing
+            "github.com/enterprise",  # product marketing
+            "github.com/enterprise/*", # product marketing
+            "github.com/resources",  # product marketing
+            "github.com/resources/*",  # product marketing
+            "skills.github.com",
+
+            "*.stackoverflow.co/*",
+            "stackoverflow.co",
+            "stackoverflow.co/*",
+            "stackoverflow.blog*",
+            "api.stackexchange.com",
+            "data.stackexchange.com",
+            "stackoverflow.com/users/signup*"
+
+            # noise?
+            "*.forem.com",
+
+            # yeah, well, the feeling is mutual
+            "twitter.com/*",
+            "x.com/*",
+
+            # HTTP 999, worth reporting but not crawling
+            "linkedin.com/*",
+            # Anti bot
+            "reddit.com/*",
+
+        ],
+
+        # Policies
+        "same_domain_policy": "no-self-domain-or-subdomain",  # or "follow", "no-self-domain"
+        "use_registrable_domain": False,  # set True if tldextract is installed
+    }
 async def crawl_and_score(
     origin_url: str,
     *,
@@ -65,8 +121,8 @@ async def crawl_and_score(
 
 
     # 1. Crawl for evidence, with fallback from httpx to Playwright
-    evidence = []
-    errors = []
+    evidence:list[EvidenceRecord] = []
+    errors:list[str] = []
     try:
         # Stage 1: Attempt crawl with lightweight HTTP client
         log.info("Step 1a: Crawling with lightweight HTTP client (httpx).")

@@ -8,18 +8,65 @@ dependencies = [
     "httpx",
     "beautifulsoup4",
     "lxml",
-    # todo: move
-    "pytest",
-    "pytest_httpx",
+    "tldextract",
     "playwright>=1.40.0"
-
 ]
 
-[project.optional-dependencies]
-test = [
-    "pytest",
+[dependency-groups]
+dev = [
     "pytest-httpx",
+    "jiggle-version>=2.0.1",
+    "maturin>=1.9.6; python_version >= '3.14'",
+    "pydantic>=2.12.0; python_version >= '3.14'",
+    "troml-dev-status>=0.4.1; python_version >= '3.9'",
+    "git2md; python_version >= '3.10'",
+    "pyclean; python_version >= '3.12'",
+    "strip-docs>=1.0; python_version >= '3.12'",
+    "gha-update; python_version >= '3.12'",
+    "mkdocstrings[python]",
+    "mkdocs; python_version >= '3.12'",
+    "mdformat",
+    # plugin finder
+    "packaging; python_version >= '3.8'",
+    # mpy
+    "mypy; python_version >= '3.8'",
+    "types-toml; python_version >= '3.8'",
+    "types-jsonschema; python_version >= '3.8'",
+    # reports
+
+    # build
+    "vermin; python_version >= '3.8'",
+    "metametameta>=0.1.3; python_version >= '3.9'",
+    "hatchling; python_version >= '3.8'",
+    "ruff>=0.12.0; python_version >= '3.8'",
+    "pylint; python_version >= '3.8'",
+    "bandit; python_version >= '3.8'",
+    "pre-commit; python_version >= '3.8'",
+    # testing tools
+    "pytest; python_version >= '3.8'",
+    "pytest-cov; python_version >= '3.8'",
+    "pytest-xdist>=3.5.0; python_version >= '3.8'",
+    "pytest-randomly>=3.15.0; python_version >= '3.8'",
+    "pytest-sugar>=0.9.7; python_version >= '3.8'",
+    "pytest-mock; python_version >= '3.8'",
+    "pytest-unused-fixtures; python_version >= '3.10'",
+    "hypothesis[cli]; python_version >= '3.8'",
+    "detect-test-pollution",
+    "pytest-timeout>=2.4.0",
+    # docs
+    "interrogate>=1.5.0; python_version >= '3.8'",
+    "pydoctest==0.2.1; python_version >= '3.8'",
+    "pdoc3>=0.5.0; python_version >= '3.8'",
+    "mdformat>=0.5.0; python_version >= '3.8'",
+    "linkcheckmd>=1.4.0; python_version >= '3.8'",
+    "codespell>=2.2.6; python_version >= '3.8'",
+    "pyenchant>=3.2.2; python_version >= '3.8'",
 ]
+
+#[project.optional-dependencies]
+#test = [
+#
+#]
 
 [project.scripts]
 naive_backlink = "naive_backlink.cli:main"

@@ -7,7 +7,7 @@ import asyncio  # Import the asyncio library
 import json
 import logging
 import sys
-from typing import Sequence
+from typing import Sequence, Set
 
 from naive_backlink import __version__
 from naive_backlink.api import crawl_and_score
@@ -92,9 +92,38 @@ async def async_main(argv: Sequence[str] | None = None) -> int:
         if result.evidence:
             print("\n--- Evidence Found ---")
             for ev in result.evidence:
-                print(
-                    f"- [{ev.classification.upper():<6}] Backlink found on page: {ev.target.url}"
-                )
+                print(f"- [{(ev.classification or '').upper():<8}] on: {ev.target.url}")
+
+            # ---- Tree rendering (A ↔ B ↔ C) ----
+            origin = None
+            if result.evidence:
+                origin = result.evidence[0].source.url  # all evidence uses same origin
+            if origin:
+                # Build adjacency from evidence
+                direct: Set[str] = set()  # B where A ↔ B direct
+                edges: dict[str, list[str]] = {}  # B -> [C...]
+
+                for ev in result.evidence:
+                    if ev.classification in ("strong", "weak"):
+                        direct.add(ev.target.url)
+                    elif ev.classification == "indirect" and ev.notes:
+                        # expected: "INDIRECT via pivot={B} chain=A<->B<->C"
+                        try:
+                            parts = ev.notes.split("pivot=")[1]
+                            pivot_part, _ = parts.split(" chain=", 1)
+                            pivot = pivot_part.strip()
+                        except Exception:
+                            pivot = None
+                        c = ev.target.url
+                        if pivot:
+                            edges.setdefault(pivot, []).append(c)
+
+                print("\n--- Link Graph ---")
+                print(f"{origin}")
+                for b in sorted(direct):
+                    print(f"├─ {b}  [direct]")
+                    for c in sorted(edges.get(b, [])):
+                        print(f"│  └─ {c}  [indirect via {b}]")
         if result.errors:
             print("\n--- Errors Encountered ---")
             for error in result.errors:
