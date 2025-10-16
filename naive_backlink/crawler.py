@@ -26,18 +26,22 @@ from typing import Any, Deque, Dict, List, Set
 import httpx
 from bs4 import BeautifulSoup
 
-from .models import EvidenceRecord
-from .link_logic import (
+from naive_backlink.cache import CacheConfig, FileCache
+from naive_backlink.link_logic import (
+    _rel_list,
     LogicConfig,
+    detect_backlink_element,
     extract_href_elements,
+    is_blacklisted,
+    is_fetchable_url,
+    is_probably_html_url,
+    make_evidence,
+    make_indirect_evidence,
     normalize_url,
     queue_candidates_from_origin,
     queue_candidates_from_pivot,
-    detect_backlink_element,
-    make_evidence,
-    make_indirect_evidence,
-    is_fetchable_url, is_probably_html_url, is_blacklisted,
 )
+from naive_backlink.models import EvidenceRecord
 
 log = logging.getLogger(__name__)
 
@@ -56,7 +60,13 @@ class Crawler:
       - trusted: list[str]
       - same_domain_policy: "follow" | "no-self-domain" | "no-self-domain-or-subdomain"
       - use_registrable_domain: bool
+      - only_whitelist: bool
+      - only_rel_me: bool
+      - whitelist: list[str]
+      - blacklist: list[str]
+      ...
     """
+
     origin_url: str
     config: Dict[str, Any]
     seed_urls: List[str] | None = None
@@ -70,12 +80,15 @@ class Crawler:
 
     # second-degree tracking
     parent: Dict[str, str] = field(default_factory=dict)  # neighbor C -> pivot B
-    pivot_has_backlink_to_origin: Set[str] = field(default_factory=set)  # B that link to A
+    pivot_has_backlink_to_origin: Set[str] = field(
+        default_factory=set
+    )  # B that link to A
     pivot_outlinked: Dict[str, Set[str]] = field(default_factory=dict)  # B -> {C}
 
     # HTTP client + derived
     _client: httpx.AsyncClient = field(init=False, repr=False)
     normalized_origin_url: str = field(init=False)
+    _cache: FileCache | None = field(default=None, init=False, repr=False)
 
     async def __aenter__(self) -> "Crawler":
         headers = {
@@ -85,6 +98,16 @@ class Crawler:
                 "(KHTML, like Gecko) Chrome/107.0.0.0 Safari/537.36",
             )
         }
+
+        cache_cfg_raw = self.config["cache"]
+        cc = CacheConfig(
+            enabled=bool(cache_cfg_raw["enabled"]),
+            directory=str(cache_cfg_raw.get("directory", ".naive_backlink_cache")),
+            expire_seconds=int(cache_cfg_raw.get("expire_seconds", 24 * 3600)),
+            store_errors=bool(cache_cfg_raw.get("store_errors", False)),
+        )
+        self._cache = FileCache(cc)
+
         self._client = httpx.AsyncClient(
             follow_redirects=True,
             timeout=self.config.get("timeout", 10.0),
@@ -108,11 +131,14 @@ class Crawler:
 
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
         await self._client.aclose()
+        if self._cache:
+            self._cache.close()  # NEW
         log.info("httpx session closed.")
 
     async def _fetch_and_parse(self, url: str) -> BeautifulSoup | None:
         """
         Fetch a URL and return a BeautifulSoup tree, or None on error/non-HTML/too-large.
+        Honors on-disk cache for successful 200 text/html responses.
         """
         if not is_fetchable_url(url):
             log.info("Skipping non-fetchable URL (scheme not http/https): %s", url)
@@ -124,6 +150,21 @@ class Crawler:
         if url in self.visited_urls:
             return None
         self.visited_urls.add(url)
+
+        # ---- NEW: cache lookup ----
+        if self._cache:
+            hit = self._cache.get(url)
+            if (
+                    hit
+                    and hit.get("status") == 200
+                    and "text/html" in hit.get("content_type", "")
+            ):
+                log.info("Cache hit for %s", url)
+                text = hit.get("text", "")
+                if not text:
+                    log.debug("Cached entry missing body; ignoring.")
+                else:
+                    return BeautifulSoup(text, "html.parser")
 
         try:
             resp = await self._client.get(url)
@@ -139,12 +180,25 @@ class Crawler:
                 log.info("Skipping non-HTML content at %s (%s)", url, ctype)
                 return None
 
-            max_bytes = self.config.get("max_content_bytes", 1024 * 1024)
-            if len(resp.content) > max_bytes:
-                msg = f"Content too large at {url} ({len(resp.content)} > {max_bytes})"
-                log.warning(msg)
-                self.errors.append(msg)
-                return None
+            # It's been downloaded. Might as well look at it.
+            # max_bytes = self.config.get("max_content_bytes", 1024 * 1024)
+            # if len(resp.content) > max_bytes:
+            #     msg = f"Content too large at {url} ({len(resp.content)} > {max_bytes})"
+            #     log.warning(msg)
+            #     self.errors.append(msg)
+            #     return None
+
+            # ---- NEW: cache store (200 + text/html) ----
+
+            if self._cache is not None:
+                self._cache.set_html_ok(
+                    url,
+                    final_url=str(resp.url),
+                    status=status,
+                    headers=dict(resp.headers),
+                    text=resp.text,
+                    content_type=ctype,
+                )
 
             return BeautifulSoup(resp.text, "html.parser")
 
@@ -162,30 +216,46 @@ class Crawler:
             msg = f"Error parsing {url}: {e}"
             log.error(msg)
             self.errors.append(msg)
-            return None
+            # Only return None on expected errors. Everything else is a bug.
+            raise
 
     async def crawl(self) -> None:
         """
         BFS crawl honoring hop limits. On origin page, enqueue outbound candidates.
         On candidate pages, detect first backlink to origin and record evidence.
         """
+
+        # Pass new config values to LogicConfig
         cfg = LogicConfig(
             max_outlinks=self.config.get("max_outlinks", 50),
             trusted_domains=self.config.get("trusted", []),
             same_domain_policy=self.config.get("same_domain_policy", "no-self-domain"),
             use_registrable_domain=self.config.get("use_registrable_domain", False),
             blacklist_patterns=self.config.get("blacklist", []),
+            whitelist_patterns=self.config.get("whitelist", []),
+            only_whitelist=self.config.get("only_whitelist", False),
         )
+
+        # Get rel-me policy for use in this method
+        only_rel_me = self.config.get("only_rel_me", False)
 
         max_hops = self.config.get("max_hops", 3)
 
         while self.queue:
             current_url, hops = self.queue.popleft()
 
+            # 🔒 Whitelist check (if enabled)
+            # This is now handled inside queue_candidates_* in link_logic.py
+            # But we must check for blacklisting.
+
             # 🔒 Skip blacklisted before any network I/O
             if is_blacklisted(current_url, cfg):
                 log.info("Skipping blacklisted URL: %s", current_url)
                 continue
+
+            # We skip whitelist check here because the origin (hops=0) should
+            # always be allowed, and candidates (hops>0) are filtered
+            # by link_logic.py *before* being added to the queue.
 
             if hops >= max_hops:
                 # Prune this branch; do not fetch/parse
@@ -196,7 +266,7 @@ class Crawler:
                 continue
 
             elements = extract_href_elements(soup)
-            is_origin_page = (current_url == self.normalized_origin_url)
+            is_origin_page = current_url == self.normalized_origin_url
 
             if is_origin_page:
                 # A → B candidates
@@ -219,6 +289,18 @@ class Crawler:
                     origin_url=self.normalized_origin_url,
                     elements=elements,
                 )
+
+                # --- NEW: Check for only_rel_me mode ---
+                if tag is not None and only_rel_me:
+                    rels = _rel_list(tag)
+                    if "me" not in rels:
+                        log.info(
+                            "Found backlink, but ignoring (not rel=me) in only-rel-me mode: %s",
+                            current_url,
+                        )
+                        tag = None  # Discard the tag, skipping evidence creation
+                # --- End new check ---
+
                 if tag is not None:
                     ev = make_evidence(
                         source_url=current_url,
@@ -244,7 +326,9 @@ class Crawler:
                         visited=self.visited_urls,
                     )
                     if next_neighbors:
-                        self.pivot_outlinked.setdefault(current_url, set()).update(next_neighbors)
+                        self.pivot_outlinked.setdefault(current_url, set()).update(
+                            next_neighbors
+                        )
                         for c in next_neighbors:
                             # remember parent (C -> B)
                             if c not in self.parent:
@@ -260,6 +344,17 @@ class Crawler:
                         origin_url=pivot_url,
                         elements=elements,
                     )
+
+                    # --- NEW: Check for only_rel_me mode (for indirect) ---
+                    # We only apply rel-me logic to the *direct* B->A link,
+                    # not the C->B link. The B->A check was already done above.
+                    # We only care that the C->B link *exists*.
+                    # The `only_rel_me` check on C->B is NOT applied, as
+                    # indirect links are not `rel=me` by definition.
+                    # However, we must respect that the B->A link
+                    # was only established if it was `rel=me` (if in that mode).
+                    # This is handled by checking `pivot_has_backlink_to_origin`.
+
                     if tag_to_pivot is not None:
                         # confirm B → C existed (we only queued C from B's outlinks)
                         # and B ↔ A has been established
@@ -271,8 +366,14 @@ class Crawler:
                                 hops=hops,  # typically 2
                                 ordinal=len(self.evidence) + 1,
                             )
-                            self.evidence.append(ev_ind)
-                            self.evidence_producing_urls.add(current_url)
+                            # Do not add indirect evidence if in only_rel_me mode
+                            if not only_rel_me:
+                                self.evidence.append(ev_ind)
+                                self.evidence_producing_urls.add(current_url)
+                            else:
+                                log.debug(
+                                    "Skipping indirect evidence in only-rel-me mode."
+                                )
 
     def get_results(self) -> tuple[List[EvidenceRecord], List[str]]:
         """Return accumulated evidence and errors."""

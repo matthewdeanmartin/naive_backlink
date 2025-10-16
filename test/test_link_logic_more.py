@@ -5,22 +5,26 @@ import pytest
 from bs4 import BeautifulSoup
 
 from naive_backlink.link_logic import (
+    _is_same_domain_blocked,
+)  # private helper; exercised for policy behavior
+from naive_backlink.link_logic import _netloc  # private helper
+from naive_backlink.link_logic import (
+    _registrable_domain_or,
+)  # private but deterministic enough for fallback tests
+from naive_backlink.link_logic import (
     LogicConfig,
-    normalize_url,
-    extract_href_elements,
-    detect_backlink_element,
-    queue_candidates_from_origin,
     classify_backlink,
-    make_evidence,
-    _registrable_domain_or,   # private but deterministic enough for fallback tests
-    _netloc,                  # private helper
-    _is_same_domain_blocked,  # private helper; exercised for policy behavior
+    detect_backlink_element,
+    extract_href_elements,
     is_fetchable_url,
+    make_evidence,
+    normalize_url,
+    queue_candidates_from_origin,
 )
-from naive_backlink.models import URLContext, LinkDetails
-
+from naive_backlink.models import LinkDetails, URLContext
 
 # ---------- normalize_url / scheme/host handling ----------
+
 
 @pytest.mark.parametrize(
     "inp, exp",
@@ -44,6 +48,7 @@ def test_normalize_url_malformed_returns_input():
 
 # ---------- fetchability filter ----------
 
+
 @pytest.mark.parametrize(
     "u, ok",
     [
@@ -64,11 +69,13 @@ def test_is_fetchable_url(u, ok):
 
 # ---------- _netloc helper ----------
 
+
 def test__netloc_extracts_host():
     assert _netloc("https://Sub.Example.com/a") == "sub.example.com"
 
 
 # ---------- registrable domain helper ----------
+
 
 def test__registrable_domain_or_fallback_strips_www_when_no_tldextract():
     # Behavior without tldextract: returns host minus a leading www.
@@ -83,6 +90,7 @@ def test__registrable_domain_or_with_tldextract_if_available():
 
 
 # ---------- same-domain policy gates ----------
+
 
 @pytest.mark.parametrize(
     "policy,cand,orig,blocked",
@@ -108,7 +116,7 @@ def test__is_same_domain_blocked_naive(policy, cand, orig, blocked):
 # @pytest.mark.skipif(pytest.importorskip.__self__ is None, reason="placeholder")
 def test__is_same_domain_blocked_registrable_domain(monkeypatch):
     # Skip if tldextract missing
-    tldextract = pytest.importorskip("tldextract")
+    pytest.importorskip("tldextract")
     cfg = LogicConfig(
         max_outlinks=10,
         trusted_domains=[],
@@ -122,6 +130,7 @@ def test__is_same_domain_blocked_registrable_domain(monkeypatch):
 
 
 # ---------- extract_href_elements ----------
+
 
 def test_extract_href_elements_includes_a_and_link_only_with_href():
     html = """
@@ -138,10 +147,11 @@ def test_extract_href_elements_includes_a_and_link_only_with_href():
     soup = BeautifulSoup(html, "html.parser")
     els = extract_href_elements(soup)
     hrefs = [e.get("href") for e in els]
-    assert hrefs == ['/one', 'https://example.com/u/me', '/css/x.css']
+    assert hrefs == ["/one", "https://example.com/u/me", "/css/x.css"]
 
 
 # ---------- detect_backlink_element ----------
+
 
 def test_detect_backlink_element_matches_resolved_and_normalized():
     current = "https://site.example/path/page.html"
@@ -152,7 +162,9 @@ def test_detect_backlink_element_matches_resolved_and_normalized():
     <a href="https://ORIGIN.example">exact strong candidate</a>
     """
     soup = BeautifulSoup(html, "html.parser")
-    tag = detect_backlink_element(current_url=current, origin_url=origin, elements=soup.find_all(["a", "link"]))
+    tag = detect_backlink_element(
+        current_url=current, origin_url=origin, elements=soup.find_all(["a", "link"])
+    )
     assert tag is not None
     assert tag.get("href") in {"//origin.example", "https://ORIGIN.example"}
 
@@ -169,6 +181,7 @@ def test_detect_backlink_element_ignores_non_fetchable():
 
 
 # ---------- queue_candidates_from_origin (no network) ----------
+
 
 def test_queue_candidates_from_origin_skips_non_fetchable_and_duplicates_and_visited():
     origin = "https://origin.example/"
@@ -264,8 +277,10 @@ def test_queue_candidates_from_origin_policy_blocks_self_and_subdomains():
 
 # ---------- classify_backlink / make_evidence ----------
 
+
 def _soup_tag(html: str):
     return BeautifulSoup(html, "html.parser").find(True)
+
 
 def test_classify_backlink_rel_me_and_trusted_surface():
     tag = _soup_tag('<a rel="me nofollow" href="https://origin.example/">me</a>')
@@ -275,7 +290,9 @@ def test_classify_backlink_rel_me_and_trusted_surface():
         same_domain_policy="follow",
         use_registrable_domain=False,
     )
-    kind, classification, trusted_surface = classify_backlink(tag, "https://sub.trusted.example/page", cfg)
+    kind, classification, trusted_surface = classify_backlink(
+        tag, "https://sub.trusted.example/page", cfg
+    )
     assert kind == "rel-me"
     assert classification == "strong"
     assert trusted_surface is True
@@ -283,7 +300,12 @@ def test_classify_backlink_rel_me_and_trusted_surface():
 
 def test_make_evidence_fields_populated():
     tag = _soup_tag('<link rel="me" href="https://origin.example/">')
-    cfg = LogicConfig(max_outlinks=10, trusted_domains=[], same_domain_policy="follow", use_registrable_domain=False)
+    cfg = LogicConfig(
+        max_outlinks=10,
+        trusted_domains=[],
+        same_domain_policy="follow",
+        use_registrable_domain=False,
+    )
     ev = make_evidence(
         source_url="https://candidate.example/p",
         origin_url="https://origin.example",

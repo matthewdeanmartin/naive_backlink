@@ -1,42 +1,92 @@
 from __future__ import annotations
 
 import fnmatch
+import logging  # Added logging
 import os
+from dataclasses import dataclass
+from typing import Iterable, List, Literal
+from urllib.parse import urljoin, urlparse
 
 import tldextract  # optional dependency
-from dataclasses import dataclass
-from typing import Iterable, List, Literal, Optional
-from urllib.parse import urljoin, urlparse
 from bs4 import BeautifulSoup, Tag
 
-from .models import EvidenceRecord, LinkDetails, URLContext
-from urllib.parse import urljoin, urlparse
+from naive_backlink.models import EvidenceRecord, LinkDetails, URLContext
+
+log = logging.getLogger(__name__)  # Added logger
 
 SameDomainPolicy = Literal["follow", "no-self-domain", "no-self-domain-or-subdomain"]
 
 # Add near top
 EXTENSION_DENYLIST = {
     # images
-    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico", ".svg", ".avif",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".webp",
+    ".bmp",
+    ".ico",
+    ".svg",
+    ".avif",
     # video/audio
-    ".mp4", ".m4v", ".mov", ".webm", ".ogg", ".ogv", ".mp3", ".wav", ".flac", ".aac",
+    ".mp4",
+    ".m4v",
+    ".mov",
+    ".webm",
+    ".ogg",
+    ".ogv",
+    ".mp3",
+    ".wav",
+    ".flac",
+    ".aac",
     # docs/binaries/archives
-    ".pdf", ".zip", ".tar", ".gz", ".tgz", ".bz2", ".xz", ".7z", ".rar",
-    ".exe", ".msi", ".dmg", ".iso",
-    ".woff", ".woff2", ".ttf", ".otf",
-    ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
+    ".pdf",
+    ".zip",
+    ".tar",
+    ".gz",
+    ".tgz",
+    ".bz2",
+    ".xz",
+    ".7z",
+    ".rar",
+    ".exe",
+    ".msi",
+    ".dmg",
+    ".iso",
+    ".woff",
+    ".woff2",
+    ".ttf",
+    ".otf",
+    ".doc",
+    ".docx",
+    ".xls",
+    ".xlsx",
+    ".ppt",
+    ".pptx",
     # styles/scripts (rarely identity pages)
-    ".css", ".js", ".mjs", ".map",
+    ".css",
+    ".js",
+    ".mjs",
+    ".map",
 }
 
 # rel values that indicate assets, not pages
 NON_HTML_REL = {
-    "icon", "shortcut icon", "apple-touch-icon", "mask-icon", "manifest", "preload",
-    "prefetch", "dns-prefetch", "modulepreload", "stylesheet",  # we don't crawl CSS
+    "icon",
+    "shortcut icon",
+    "apple-touch-icon",
+    "mask-icon",
+    "manifest",
+    "preload",
+    "prefetch",
+    "dns-prefetch",
+    "modulepreload",
+    "stylesheet",  # we don't crawl CSS
 }
 
 
 ALLOWED_SCHEMES = {"http", "https"}
+
 
 def _path_ext(u: str) -> str:
     try:
@@ -46,6 +96,7 @@ def _path_ext(u: str) -> str:
         return ext
     except Exception:
         return ""
+
 
 def is_probably_html_url(u: str) -> bool:
     """
@@ -59,6 +110,7 @@ def is_probably_html_url(u: str) -> bool:
         return False
     return True
 
+
 def _rel_list(tag: Tag) -> List[str]:
     rel = tag.get("rel", None)
     if not rel:
@@ -69,10 +121,12 @@ def _rel_list(tag: Tag) -> List[str]:
 
     return [r.strip().lower() for r in rel if isinstance(r, str)]
 
+
 def _is_asset_rel(tag: Tag) -> bool:
     rels = set(_rel_list(tag))
     # treat any intersection as asset-ish
     return any(r in NON_HTML_REL for r in rels)
+
 
 def _scheme(u: str) -> str:
     try:
@@ -88,13 +142,19 @@ def is_fetchable_url(u: str) -> bool:
 
 @dataclass(frozen=True)
 class LogicConfig:
+    """Updated LogicConfig to hold new policy settings."""
+
     max_outlinks: int
     trusted_domains: List[str]
     same_domain_policy: SameDomainPolicy = "no-self-domain"
     # Optional: if True and tldextract is installed, use registrable domain to
     # decide subdomain relationships; otherwise fall back to naive suffix match.
     use_registrable_domain: bool = False
+    # Lists
     blacklist_patterns: List[str] | None = None
+    whitelist_patterns: List[str] | None = None
+    # Modes
+    only_whitelist: bool = False
 
 
 def _host_and_hostpath(u: str) -> tuple[str, str]:
@@ -113,45 +173,105 @@ def _host_and_hostpath(u: str) -> tuple[str, str]:
         return "", ""
 
 
-def is_blacklisted(u: str, cfg: LogicConfig) -> bool:
-    """
-    Match against patterns using fnmatch (supports '*' and '?').
-    Patterns are compared against:
-      1) host          e.g., 'joinmastodon.org'
-      2) host+path     e.g., 'github.com/sponsors', 'github.com/solutions/xyz'
-    Also try with an added '/*' suffix normalization for domain-wide patterns.
-    """
-    patterns = (cfg.blacklist_patterns or [])
+# def is_blacklisted(u: str, cfg: LogicConfig) -> bool:
+#     """
+#     Match against blacklist patterns using fnmatch (supports '*' and '?').
+#
+#     Patterns are compared against:
+#       1) host          e.g., 'joinmastodon.org'
+#       2) host+path     e.g., 'github.com/sponsors', 'github.com/solutions/xyz'
+#     Also try with an added '/*' suffix normalization for domain-wide patterns.
+#
+#     Patterns are compared against multiple normalized variants of the URL:
+#       - host (e.g., 'github.com')
+#       - host + '/' and host + '/*'
+#       - host + path (e.g., 'github.com/sponsors')
+#       - host + path + '/' and host + path + '/*'
+#     This ensures that a pattern like 'github.com/sponsors/*' matches both
+#     'https://github.com/sponsors' and deeper paths such as
+#     'https://github.com/sponsors/pypa'.
+#     """
+#     patterns = (cfg.blacklist_patterns or [])
+#     if not patterns:
+#         return False
+#
+#     host, hostpath = _host_and_hostpath(u)
+#     if not host:
+#         return False  # Can't match on an empty host
+#
+#     # Build candidate forms to test against
+#     candidates = {
+#         host,
+#         f"{host}/",
+#         f"{host}/*",
+#         hostpath,
+#         f"{hostpath}/",
+#         f"{hostpath}/*",
+#     }
+#
+#     for pat in patterns:
+#         p = pat.lower().strip()
+#         # direct fnmatch against all candidates
+#         if any(fnmatch.fnmatchcase(c, p) for c in candidates):
+#             return True
+#
+#         # handle leading '*.' wildcard for subdomain rules like '*.example.com/*'
+#         if p.startswith("*."):
+#             suffix = p[2:].replace("/*", "").rstrip("/")
+#             # require that host is a subdomain of suffix, not equal to it
+#             if host.endswith(suffix) and host != suffix:
+#                 return True
+#
+#     return False
+
+
+def _match_url_against_patterns(u: str, patterns: list[str]) -> bool:
+    """Generic fnmatch helper used by is_blacklisted and is_whitelisted."""
     if not patterns:
         return False
 
     host, hostpath = _host_and_hostpath(u)
     if not host:
-        return False
+        return False  # Can't match on an empty host
 
-    # create a small set of candidate strings to test
+    # Build candidate forms to test against
     candidates = {
         host,
-        hostpath,                        # github.com/sponsors
-        f"{host}/*",                     # for 'joinmastodon.org/*' patterns
-        f"{hostpath}/*".rstrip("/*"),    # stable
+        f"{host}/",
+        f"{host}/*",
+        hostpath,
+        f"{hostpath}/",
+        f"{hostpath}/*",
     }
 
     for pat in patterns:
-        p = pat.lower().rstrip()  # relaxed input
-        # direct comparisons
+        p = pat.lower().strip()
+        # direct fnmatch against all candidates
         if any(fnmatch.fnmatchcase(c, p) for c in candidates):
             return True
-        # handle leading '*.' convenience (subdomains)
+
+        # handle leading '*.' wildcard for subdomain rules like '*.example.com/*'
         if p.startswith("*."):
-            # e.g. "*.joinmastodon.org/*" should match "sub.joinmastodon.org/...".
-            bare = p[2:]  # "joinmastodon.org/*"
-            if host.endswith(bare.replace("/*", "")):
-                # If domain matched, accept the rule
+            suffix = p[2:].replace("/*", "").rstrip("/")
+            # require that host is a subdomain of suffix, not equal to it
+            if host.endswith(suffix) and host != suffix:
                 return True
+
     return False
 
+
+def is_blacklisted(u: str, cfg: LogicConfig) -> bool:
+    """Uses the generic matcher against the blacklist."""
+    return _match_url_against_patterns(u, cfg.blacklist_patterns or [])
+
+
+def is_whitelisted(u: str, cfg: LogicConfig) -> bool:
+    """Uses the generic matcher against the whitelist."""
+    return _match_url_against_patterns(u, cfg.whitelist_patterns or [])
+
+
 # ---------- URL helpers ----------
+
 
 def normalize_url(url: str) -> str:
     """
@@ -175,7 +295,7 @@ def normalize_url(url: str) -> str:
             scheme=(p.scheme or "").lower(),
             netloc=(p.netloc or "").lower(),
             path=path,
-            fragment=""
+            fragment="",
         ).geturl()
     except Exception:
         return url
@@ -195,7 +315,7 @@ def _registrable_domain_or(host: str, fallback_to_host: bool = True) -> str:
         if ext.domain and ext.suffix:
             return f"{ext.domain}.{ext.suffix}".lower()
     except Exception:
-        pass
+        pass  # no qa # nosec
     if fallback_to_host:
         return host[4:] if host.startswith("www.") else host
     return host
@@ -227,6 +347,7 @@ def _is_same_domain_blocked(candidate: str, origin: str, cfg: LogicConfig) -> bo
 
 # ---------- Link extraction & filtering ----------
 
+
 def extract_href_elements(soup: BeautifulSoup) -> List[Tag]:
     """
     Return all elements with href among the set {<a>, <link>}.
@@ -240,16 +361,18 @@ def extract_href_elements(soup: BeautifulSoup) -> List[Tag]:
 
 
 def queue_candidates_from_origin(
-        current_url: str,
-        origin_url: str,
-        elements: Iterable[Tag],
-        cfg: LogicConfig,
-        already_queued: Iterable[str],
-        visited: Iterable[str],
+    current_url: str,
+    origin_url: str,
+    elements: Iterable[Tag],
+    cfg: LogicConfig,
+    already_queued: Iterable[str],
+    visited: Iterable[str],
 ) -> List[str]:
     """
     From the origin page, choose outbound candidate URLs to crawl next hop.
     Considers both <a href> and <link href>.
+
+    Applies blacklist and (if enabled) whitelist logic.
     """
     out: List[str] = []
     # origin_domain = urlparse(origin_url).netloc
@@ -270,14 +393,21 @@ def queue_candidates_from_origin(
         if _is_asset_rel(el):
             continue
 
-        resolved = urljoin(current_url, href) # type: ignore[arg-type,type-var]
-        norm = normalize_url(resolved) # type: ignore[arg-type]
+        resolved = urljoin(current_url, href)  # type: ignore[arg-type,type-var]
+        norm = normalize_url(resolved)  # type: ignore[arg-type]
 
         # only follow http/https
         if not is_fetchable_url(norm):
             continue
 
-        if is_blacklisted(norm, cfg):
+        # --- NEW: Whitelist Mode Check ---
+        if cfg.only_whitelist and not is_whitelisted(norm, cfg):
+            log.debug("[Whitelist Mode] Skipping non-whitelisted URL: %s", norm)
+            continue
+
+        # --- Blacklist Mode Check (default) ---
+        if not cfg.only_whitelist and is_blacklisted(norm, cfg):
+            log.debug("[Blacklist Mode] Skipping blacklisted URL: %s", norm)
             continue
 
         # Only follow likely-HTML targets (blocks .png/.ico/.svg/... before GET)
@@ -297,6 +427,7 @@ def queue_candidates_from_origin(
 
     return out
 
+
 def queue_candidates_from_pivot(
     current_url: str,
     pivot_url: str,
@@ -315,6 +446,8 @@ def queue_candidates_from_pivot(
       - respect max_outlinks
       - allow same-domain as pivot; the "no-self-domain*" policy is relative to ORIGIN,
         not the pivot (keeps exploration focused on distinct surfaces from A).
+
+    Applies blacklist and (if enabled) whitelist logic.
     """
     out: List[str] = []
     queued_set = set(already_queued)
@@ -332,7 +465,15 @@ def queue_candidates_from_pivot(
         resolved = normalize_url(urljoin(current_url, href))  # type: ignore[arg-type,type-var]
         if not is_fetchable_url(resolved):
             continue
-        if is_blacklisted(resolved, cfg):
+
+        # --- NEW: Whitelist Mode Check ---
+        if cfg.only_whitelist and not is_whitelisted(resolved, cfg):
+            log.debug("[Whitelist Mode] Skipping non-whitelisted URL: %s", resolved)
+            continue
+
+        # --- Blacklist Mode Check (default) ---
+        if not cfg.only_whitelist and is_blacklisted(resolved, cfg):
+            log.debug("[Blacklist Mode] Skipping blacklisted URL: %s", resolved)
             continue
         if not is_probably_html_url(resolved):
             continue
@@ -347,11 +488,10 @@ def queue_candidates_from_pivot(
 # ---------- Backlink detection & classification ----------
 
 
-
 def detect_backlink_element(
-        current_url: str,
-        origin_url: str,
-        elements: Iterable[Tag],
+    current_url: str,
+    origin_url: str,
+    elements: Iterable[Tag],
 ) -> Tag | None:
     """
     Return the first tag (either <a> or <link>) on current_url that links back to origin_url.
@@ -372,7 +512,9 @@ def detect_backlink_element(
     return None
 
 
-def classify_backlink(tag: Tag, source_url: str, cfg: LogicConfig) -> tuple[str, str, bool]:
+def classify_backlink(
+    tag: Tag, source_url: str, cfg: LogicConfig
+) -> tuple[str, str, bool]:
     """
     Returns (kind, classification, trusted_surface).
     - classification: 'strong' iff rel~="me" (works for both <a> and <link>)
@@ -390,26 +532,28 @@ def classify_backlink(tag: Tag, source_url: str, cfg: LogicConfig) -> tuple[str,
 
 
 def make_evidence(
-        source_url: str,
-        origin_url: str,
-        hops: int,
-        tag: Tag,
-        cfg: LogicConfig,
-        ordinal: int,
+    source_url: str,
+    origin_url: str,
+    hops: int,
+    tag: Tag,
+    cfg: LogicConfig,
+    ordinal: int,
 ) -> EvidenceRecord:
     kind, classification, trusted_surface = classify_backlink(tag, source_url, cfg)
     rel_vals = _rel_list(tag)
     return EvidenceRecord(
         id=f"e-backlink-{ordinal}",
-        kind=kind, # type: ignore[arg-type]
+        kind=kind,  # type: ignore[arg-type]
         source=URLContext(url=normalize_url(origin_url), context="origin-page"),
         target=URLContext(url=normalize_url(source_url), context="candidate-page"),
         link=LinkDetails(
             html=str(tag),
             rel=rel_vals,
-            nofollow=("nofollow" in rel_vals),  # applies if present on either <a> or <link>
+            nofollow=(
+                "nofollow" in rel_vals
+            ),  # applies if present on either <a> or <link>
         ),
-        classification=classification, # type: ignore[arg-type]
+        classification=classification,  # type: ignore[arg-type]
         hops=hops,
         trusted_surface=trusted_surface,
     )

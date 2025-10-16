@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from naive_backlink.models import EvidenceRecord, ScoreLabel
 
+
 def calculate_score(evidence: list[EvidenceRecord]) -> tuple[int, ScoreLabel]:
     """
     Calculates a final score based on a list of evidence records.
@@ -35,7 +36,7 @@ def calculate_score(evidence: list[EvidenceRecord]) -> tuple[int, ScoreLabel]:
     # but score >= 80 is required for a 'high' label). These coefficients are
     # chosen to ensure the tests pass and align with the PEP's intent.
     score = int(85 * s + 50 * w + 10 * i - penalties)
-    score = max(0, min(100, score)) # Clamp score between 0 and 100
+    score = max(0, min(100, score))  # Clamp score between 0 and 100
 
     # Determine label
     if score >= 80:

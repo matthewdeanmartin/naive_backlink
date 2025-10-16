@@ -32,7 +32,7 @@ test: clean uv.lock install_plugins
 	# $(VENV) pytest --doctest-modules naive_backlink
 	# $(VENV) python -m unittest discover
 	$(VENV) pytest test -vv -n 2 --cov=naive_backlink --cov-report=html --cov-fail-under 5 --cov-branch --cov-report=xml --junitxml=junit.xml -o junit_family=legacy --timeout=5 --session-timeout=600
-	$(VENV) bash ./scripts/basic_checks.sh
+	$(VENV) bash ./scripts/test.sh
 #	$(VENV) bash basic_test_with_logging.sh
 
 
