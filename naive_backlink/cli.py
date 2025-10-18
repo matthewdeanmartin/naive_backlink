@@ -1,3 +1,4 @@
+# naive_backlink/cli.py
 # Defines the command-line interface using argparse.
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ from naive_backlink.ui import (
     render_score_line,
     render_verify_header,
 )
+from naive_backlink.cache import FileCache, CacheConfig
 
 log = logging.getLogger(__name__)
 
@@ -107,6 +109,28 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _human_bytes(n: int) -> str:
+    # Compact human-readable bytes
+    units = ["B", "KB", "MB", "GB", "TB"]
+    i = 0
+    v = float(n)
+    while v >= 1024 and i < len(units) - 1:
+        v /= 1024.0
+        i += 1
+    # max 2 decimals, strip trailing zeros
+    s = f"{v:.2f}".rstrip("0").rstrip(".")
+    return f"{s} {units[i]}"
+
+
+def _init_file_cache(cache_dir: str | None, os_default: bool) -> FileCache:
+    cfg = CacheConfig()
+    if os_default:
+        cfg.directory = "os-default"
+    if cache_dir:
+        cfg.directory = cache_dir
+    return FileCache(cfg)
+
+
 async def async_main(
     argv: Sequence[str] | None = None, stdout: IO[str] | None = None
 ) -> int:
@@ -148,20 +172,89 @@ async def async_main(
         required=True,
     )
 
+    # --- cache (new command group) ---
+    cache_parser = subparsers.add_parser(
+        "cache", help="Manage the on-disk HTTP cache."
+    )
+    cache_parser.add_argument(
+        "--dir",
+        dest="cache_dir",
+        metavar="PATH",
+        default=None,
+        help="Cache directory to operate on (defaults to library default).",
+    )
+    cache_parser.add_argument(
+        "--os-default",
+        dest="cache_os_default",
+        action="store_true",
+        help="Use the OS-specific default cache directory.",
+    )
+    cache_sub = cache_parser.add_subparsers(dest="cache_cmd", required=True)
+
+    cache_clear = cache_sub.add_parser("clear", help="Wipe the entire cache directory.")
+    # no extra args
+
+    cache_stats = cache_sub.add_parser(
+        "stats", help="Show total items and size on disk."
+    )
+    # no extra args
+
+    cache_inspect = cache_sub.add_parser(
+        "inspect", help="Dump the cached record for a specific URL."
+    )
+    cache_inspect.add_argument("url", help="The exact URL key to inspect in cache.")
+
     args = parser.parse_args(argv)
     _configure_logging(args.verbose)
 
+    # ---- cache command handling (synchronous paths) -------------------------
+    if args.command == "cache":
+        fc = _init_file_cache(args.cache_dir, args.cache_os_default)
+
+        if args.cache_cmd == "clear":
+            fc.clear_all()
+            d = fc.directory or "(disabled)"
+            print(f"Cache cleared at: {d}", file=stdout)
+            return 0
+
+        if args.cache_cmd == "stats":
+            st = fc.stats()
+            items = int(st.get("items", 0))
+            bytes_on_disk = int(st.get("bytes", 0))
+            directory = st.get("directory", "")
+            out = {
+                "directory": directory,
+                "items": items,
+                "bytes": bytes_on_disk,
+                "human_bytes": _human_bytes(bytes_on_disk),
+            }
+            print(json.dumps(out, indent=2), file=stdout)
+            return 0
+
+        if args.cache_cmd == "inspect":
+            data = fc.get(args.url)
+            if data is None:
+                print("Cache miss", file=stdout)
+                return 2
+            print(json.dumps(data, indent=2, default=_json_default), file=stdout)
+            return 0
+
+        # Should not reach
+        print("Unknown cache subcommand", file=stdout)
+        return 2
+
+    # ---- normal crawl/verify flows ------------------------------------------
     try:
-        seed_urls = _load_seed_urls(args.links_file)
+        seed_urls = _load_seed_urls(getattr(args, "links_file", None))
     except FileNotFoundError:
         return 1
 
     # Collect API arguments
     api_kwargs = {
-        "origin_url": args.url,
+        "origin_url": getattr(args, "url", None),
         "seed_urls": seed_urls,
-        "only_whitelist": args.only_well_known_id_sites,
-        "only_rel_me": args.only_rel_me,
+        "only_whitelist": getattr(args, "only_well_known_id_sites", False),
+        "only_rel_me": getattr(args, "only_rel_me", False),
     }
 
     if args.command == "verify":

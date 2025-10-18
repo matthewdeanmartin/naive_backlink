@@ -1,3 +1,4 @@
+#naive_backlink/__main__.py
 # Allows the package to be run as a script using `python -m naive_backlink`
 
 from __future__ import annotations

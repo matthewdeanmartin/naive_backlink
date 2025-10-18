@@ -1,7 +1,7 @@
 [project]
 name = "naive_backlink"
 version = "0.1.0"
-description = "A naive backlink checker for non-cryptographic identity linking, based on the PEP."
+description = "A naive backlink checker for non-cryptographic identity linking."
 authors = [{ name = "Matthew D. Martin", email = "matthewdeanmartin@users.noreply.github.com" }]
 requires-python = ">=3.8"
 dependencies = [
@@ -11,11 +11,13 @@ dependencies = [
     "tldextract",
     "playwright>=1.40.0",
     "diskcache>=5.6",
-    "platformdirs>=4.0"
+    "platformdirs>=4.0",
+
 ]
 
 [dependency-groups]
 dev = [
+    "dnspython",
     "pytest-httpx",
     "jiggle-version>=2.0.1",
     "maturin>=1.9.6; python_version >= '3.14'",

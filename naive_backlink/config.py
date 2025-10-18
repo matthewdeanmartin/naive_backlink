@@ -82,6 +82,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "stackoverflow.co",
         "stackoverflow.co/*",
         "stackoverflow.blog*",
+        "https://github.githubassets.com",
+        "https://github.githubassets.com/*"
         "api.stackexchange.com",
         "data.stackexchange.com",
         "stackoverflow.com/users/signup*",

@@ -1,7 +1,4 @@
-from __future__ import annotations
-
-import logging
-
+# naive_backlink/cache.py
 """
 File-backed HTTP response cache.
 
@@ -9,18 +6,21 @@ File-backed HTTP response cache.
 - Location: default is a visible folder in CWD; optionally an OS-specific app cache dir via platformdirs.
 - Scope: only 200 OK HTML pages (text/html). No binary assets. No error pages by default.
 """
+from __future__ import annotations
 
-from dataclasses import dataclass
+import dataclasses
+import logging
 from typing import Any, Optional
+import os
+from pathlib import Path
 
-# from diskcache import Cache as _DiskCache
 import diskcache
 from platformdirs import user_cache_dir as _user_cache_dir
 
 log = logging.getLogger(__name__)
 
 
-@dataclass
+@dataclasses.dataclass
 class CacheConfig:
     enabled: bool = True
     # Either a concrete directory path, or special marker "os-default"
@@ -42,6 +42,8 @@ class FileCache:
 
         if not cfg.enabled:
             log.warning("Caching not enabled")
+            self._cache = None
+            self.app_name = app_name
             return
 
         self._cache = None
@@ -68,6 +70,61 @@ class FileCache:
     def close(self) -> None:
         if self._cache is not None:
             self._cache.close()
+
+    # ---- Introspection helpers ---------------------------------------------
+
+    @property
+    def directory(self) -> Optional[str]:
+        """Returns the absolute cache directory path if available."""
+        if self._cache is None or not self._cache.directory:
+            return None
+        return str(self._cache.directory)
+
+    def _dir_size_bytes(self) -> int:
+        d = self.directory
+        if not d:
+            return 0
+        total = 0
+        path = Path(d)
+        if not path.exists():
+            return 0
+        for p in path.rglob("*"):
+            # skip broken links just in case
+            try:
+                if p.is_file():
+                    total += p.stat().st_size
+            except OSError:
+                continue
+        return total
+
+    def stats(self) -> dict[str, int | str]:
+        """
+        Returns a simple stats dict:
+            - items: number of keys in cache
+            - bytes: on-disk size in bytes (recursive directory walk)
+            - directory: absolute directory path
+        """
+        if self._cache is None or not self._cache.directory:
+            return {"items": 0, "bytes": 0, "directory": ""}
+
+        try:
+            items = len(self._cache)
+        except Exception:
+            # very defensive: if length fails, return 0
+            items = 0
+
+        return {
+            "items": items,
+            "bytes": self._dir_size_bytes(),
+            "directory": os.path.abspath(self.directory or ""),
+        }
+
+    def clear_all(self) -> None:
+        """Clears all cache contents."""
+        if self._cache is None or not self._cache.directory:
+            log.warning("Cache disabled")
+            return
+        self._cache.clear()
 
     # ---- Public API ---------------------------------------------------------
 

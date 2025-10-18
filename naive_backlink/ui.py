@@ -1,3 +1,4 @@
+# naive_backlink/ui.py
 # Presentation-only utilities for CLI output.
 from __future__ import annotations
 
