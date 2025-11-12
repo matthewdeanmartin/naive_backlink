@@ -25,7 +25,6 @@ import json
 import socket
 import ssl
 import sys
-import time
 from typing import Iterable, Optional
 
 # Optional deps
@@ -234,10 +233,10 @@ def main() -> int:
         print()
 
     # 3) dnspython with system + specific nameservers
-    dnsp_default = resolve_with_dnspython(host, None)
+    resolve_with_dnspython(host, None)
     if args.nameservers:
         for ns in args.nameservers:
-            dnsp_ns = resolve_with_dnspython(host, [ns])
+            resolve_with_dnspython(host, [ns])
             # spacing
     print()
 
