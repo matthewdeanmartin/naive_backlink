@@ -113,3 +113,10 @@ linktr.ee - no rel=me support?
 
 ## bug
 - fails to crawl example.com, but will crawl https://example.com
+
+## JSON, XML, ETC Crawlers
+
+- pypi - blocked except via json
+- mastodon - uncertain if blocked or not, API available
+- github - generally not blocked
+- twitter - blocked, very limited free API

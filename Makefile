@@ -1,7 +1,5 @@
 .EXPORT_ALL_VARIABLES:
-# Get changed files
 
-FILES := $(wildcard **/*.py)
 
 # if you wrap everything in uv run, it runs slower.
 ifeq ($(origin VIRTUAL_ENV),undefined)
@@ -14,20 +12,9 @@ uv.lock: pyproject.toml
 	@echo "Installing dependencies"
 	@uv sync
 
-clean-pyc:
-	@echo "Removing compiled files"
-
-
-clean-test:
-	@echo "Removing coverage data"
-	@rm -f .coverage || true
-	@rm -f .coverage.* || true
-
-clean: clean-pyc clean-test
-
 # tests can't be expected to pass if dependencies aren't installed.
 # tests are often slow and linting is fast, so run tests on linted code.
-test: clean uv.lock install_plugins
+test: uv.lock install_plugins
 	@echo "Running unit tests"
 	# $(VENV) pytest --doctest-modules naive_backlink
 	# $(VENV) python -m unittest discover
@@ -35,75 +22,46 @@ test: clean uv.lock install_plugins
 	$(VENV) bash ./scripts/test.sh
 #	$(VENV) bash basic_test_with_logging.sh
 
-
-.build_history:
-	@mkdir -p .build_history
-
-.build_history/isort: .build_history $(FILES)
+isort:  
 	@echo "Formatting imports"
 	$(VENV) isort .
-	@touch .build_history/isort
 
 jiggle_version:
 ifeq ($(CI),true)
 	@echo "Running in CI mode"
-	jiggle_version check
+	$(VENV) jiggle_version check
 else
 	@echo "Running locally"
-	jiggle_version hash-all
+	$(VENV) jiggle_version hash-all
 	# jiggle_version bump --increment auto
 endif
 
-.PHONY: isort
-isort: .build_history/isort
-
-.build_history/black: .build_history .build_history/isort $(FILES) jiggle_version
+black:  isort  jiggle_version
 	@echo "Formatting code"
 	$(VENV) metametameta pep621
 	$(VENV) black naive_backlink # --exclude .venv
 	$(VENV) black test # --exclude .venv
 	$(VENV) git2md naive_backlink --ignore __init__.py __pycache__ --output SOURCE.md
 
-.PHONY: black
-black: .build_history/black
-
-.build_history/pre-commit: .build_history .build_history/isort .build_history/black
+pre-commit:  isort black
 	@echo "Pre-commit checks"
 	$(VENV) pre-commit run --all-files
-	@touch .build_history/pre-commit
 
-.PHONY: pre-commit
-pre-commit: .build_history/pre-commit
-
-.build_history/bandit: .build_history $(FILES)
+bandit:  
 	@echo "Security checks"
 	$(VENV)  bandit naive_backlink -r --quiet
-	@touch .build_history/bandit
 
-.PHONY: bandit
-bandit: .build_history/bandit
-
-.PHONY: pylint
-.build_history/pylint: .build_history .build_history/isort .build_history/black $(FILES)
+pylint:  isort black
 	@echo "Linting with pylint"
 	$(VENV) ruff --fix
 	$(VENV) pylint naive_backlink --fail-under 9.8
-	@touch .build_history/pylint
 
-# for when using -j (jobs, run in parallel)
-.NOTPARALLEL: .build_history/isort .build_history/black
 
 check: mypy test pylint bandit pre-commit update_dev_status dog_food
 
-#.PHONY: publish_test
-#publish_test:
-#	rm -rf dist && poetry version minor && poetry build && twine upload -r testpypi dist/*
-
-.PHONY: publish
 publish: test
 	rm -rf dist && hatch build
 
-.PHONY: mypy
 mypy:
 	$(VENV) echo $$PYTHONPATH
 	$(VENV) mypy naive_backlink --ignore-missing-imports --check-untyped-defs
@@ -138,17 +96,6 @@ check_all_docs: check_docs check_md check_spelling check_changelog
 check_self:
 	# Can it verify itself?
 	$(VENV) ./scripts/dog_food.sh
-
-#audit:
-#	# $(VENV) python -m naive_backlink audit
-#	$(VENV) tool_audit single naive_backlink --version=">=2.0.0"
-
-install_plugins:
-	echo "N/A"
-
-.PHONY: issues
-issues:
-	echo "N/A"
 
 core_all_tests:
 	./scripts/exercise_core_all.sh naive_backlink "compile --in examples/compile/src --out examples/compile/out --dry-run"
