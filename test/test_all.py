@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-
 from naive_backlink.models import EvidenceRecord, LinkDetails, URLContext
 from naive_backlink.scoring import calculate_score
 

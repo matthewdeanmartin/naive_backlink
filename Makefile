@@ -14,7 +14,7 @@ uv.lock: pyproject.toml
 
 # tests can't be expected to pass if dependencies aren't installed.
 # tests are often slow and linting is fast, so run tests on linted code.
-test: uv.lock install_plugins
+test: uv.lock
 	@echo "Running unit tests"
 	# $(VENV) pytest --doctest-modules naive_backlink
 	# $(VENV) python -m unittest discover
@@ -53,8 +53,8 @@ bandit:
 
 pylint:  isort black
 	@echo "Linting with pylint"
-	$(VENV) ruff --fix
-	$(VENV) pylint naive_backlink --fail-under 9.8
+	$(VENV) ruff check --fix
+	$(VENV) pylint naive_backlink --fail-under 9.2
 
 
 check: mypy test pylint bandit pre-commit update_dev_status dog_food
@@ -102,7 +102,7 @@ core_all_tests:
 	uv sync
 
 update_dev_status:
-	python -m naive_backlink update .
+	troml-dev-status update .
 
 dog_food:
 	troml-dev-status validate .

@@ -16,21 +16,21 @@ Centralized behaviors (in link_logic.py):
 - Evidence construction
 """
 from __future__ import annotations
-import asyncio
-from urllib.parse import urlparse
 
+import asyncio
 import logging
 from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Deque, Dict, List, Set
+from urllib.parse import urlparse
 
 import httpx
 from bs4 import BeautifulSoup
 
 from naive_backlink.cache import CacheConfig, FileCache
 from naive_backlink.link_logic import (
-    _rel_list,
     LogicConfig,
+    _rel_list,
     detect_backlink_element,
     extract_href_elements,
     is_blacklisted,
@@ -60,12 +60,15 @@ def _domain_group(url: str, use_registrable: bool) -> str:
     if use_registrable:
         try:
             import tldextract  # type: ignore
+
             ext = tldextract.extract(host)
             if ext.registered_domain:
                 return ext.registered_domain.lower()
         except Exception:
             # Log once per process would be ideal; keep it cheap:
-            log.debug("tldextract unavailable/failure; falling back to host for %s", host)
+            log.debug(
+                "tldextract unavailable/failure; falling back to host for %s", host
+            )
     return host.lower()
 
 
@@ -178,9 +181,9 @@ class Crawler:
         if self._cache:
             hit = self._cache.get(url)
             if (
-                    hit
-                    and hit.get("status") == 200
-                    and "text/html" in hit.get("content_type", "")
+                hit
+                and hit.get("status") == 200
+                and "text/html" in hit.get("content_type", "")
             ):
                 log.info("Cache hit for %s", url)
                 text = hit.get("text", "")
@@ -242,16 +245,15 @@ class Crawler:
             # Only return None on expected errors. Everything else is a bug.
             raise
 
-
     # --- NEW: encapsulate per-URL processing (was inline in crawl loop) -------------
 
     async def _process_url(
-            self,
-            current_url: str,
-            hops: int,
-            cfg: LogicConfig,
-            only_rel_me: bool,
-            max_hops: int,
+        self,
+        current_url: str,
+        hops: int,
+        cfg: LogicConfig,
+        only_rel_me: bool,
+        max_hops: int,
     ) -> None:
         # Whitelist handled in link_logic queue_*; enforce blacklist early:
         if is_blacklisted(current_url, cfg):
@@ -292,7 +294,10 @@ class Crawler:
         if tag is not None and only_rel_me:
             rels = _rel_list(tag)
             if "me" not in rels:
-                log.info("Found backlink, but ignoring (not rel=me) in only-rel-me mode: %s", current_url)
+                log.info(
+                    "Found backlink, but ignoring (not rel=me) in only-rel-me mode: %s",
+                    current_url,
+                )
                 tag = None
 
         if tag is not None:
@@ -319,7 +324,9 @@ class Crawler:
                 visited=self.visited_urls,
             )
             if next_neighbors:
-                self.pivot_outlinked.setdefault(current_url, set()).update(next_neighbors)
+                self.pivot_outlinked.setdefault(current_url, set()).update(
+                    next_neighbors
+                )
                 for c in next_neighbors:
                     if c not in self.parent:
                         self.parent[c] = current_url
@@ -343,7 +350,10 @@ class Crawler:
             # was only established if it was `rel=me` (if in that mode).
             # This is handled by checking `pivot_has_backlink_to_origin`.
 
-            if tag_to_pivot is not None and pivot_url in self.pivot_has_backlink_to_origin:
+            if (
+                tag_to_pivot is not None
+                and pivot_url in self.pivot_has_backlink_to_origin
+            ):
                 if not only_rel_me:
                     ev_ind = make_indirect_evidence(
                         origin_url=self.normalized_origin_url,

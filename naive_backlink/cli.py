@@ -15,6 +15,7 @@ from typing import IO, Any, Sequence, Set
 
 from naive_backlink import __version__
 from naive_backlink.api import crawl_and_score
+from naive_backlink.cache import CacheConfig, FileCache
 from naive_backlink.models import Result
 from naive_backlink.ui import (
     render_errors_section,
@@ -23,7 +24,6 @@ from naive_backlink.ui import (
     render_score_line,
     render_verify_header,
 )
-from naive_backlink.cache import FileCache, CacheConfig
 
 log = logging.getLogger(__name__)
 
@@ -173,9 +173,7 @@ async def async_main(
     )
 
     # --- cache (new command group) ---
-    cache_parser = subparsers.add_parser(
-        "cache", help="Manage the on-disk HTTP cache."
-    )
+    cache_parser = subparsers.add_parser("cache", help="Manage the on-disk HTTP cache.")
     cache_parser.add_argument(
         "--dir",
         dest="cache_dir",
@@ -191,12 +189,13 @@ async def async_main(
     )
     cache_sub = cache_parser.add_subparsers(dest="cache_cmd", required=True)
 
-    cache_clear = cache_sub.add_parser("clear", help="Wipe the entire cache directory.")
-    # no extra args
-
-    cache_stats = cache_sub.add_parser(
-        "stats", help="Show total items and size on disk."
-    )
+    # TODO: does this need to be implemented?
+    # cache_clear = cache_sub.add_parser("clear", help="Wipe the entire cache directory.")
+    # # no extra args
+    #
+    # cache_stats = cache_sub.add_parser(
+    #     "stats", help="Show total items and size on disk."
+    # )
     # no extra args
 
     cache_inspect = cache_sub.add_parser(

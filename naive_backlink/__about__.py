@@ -10,9 +10,7 @@ __all__ = [
 
 __title__ = "naive_backlink"
 __version__ = "0.1.0"
-__description__ = (
-    "A naive backlink checker for non-cryptographic identity linking."
-)
+__description__ = "A naive backlink checker for non-cryptographic identity linking."
 __credits__ = [
     {"name": "Matthew D. Martin", "email": "matthewdeanmartin@users.noreply.github.com"}
 ]

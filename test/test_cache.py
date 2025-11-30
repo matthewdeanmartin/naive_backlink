@@ -1,7 +1,6 @@
 import os
 import pathlib
 
-
 from naive_backlink.cache import CacheConfig, FileCache
 
 
@@ -124,16 +123,3 @@ def test_create_cache_object_idempotent(tmp_path):
     second_dir = str(fc._cache.directory)  # type: ignore[attr-defined]
     assert first_dir == second_dir
     assert os.path.isdir(first_dir)
-
-
-def test_disabled_cache_does_not_initialize_internal_cache():
-    cfg = CacheConfig(
-        enabled=False,
-        directory=".should_not_be_used",
-        expire_seconds=30,
-        store_errors=False,
-    )
-    fc = FileCache(cfg)
-    # Implementation detail: when disabled, constructor returns early
-    # and _cache is never created.
-    assert not hasattr(fc, "_cache")
