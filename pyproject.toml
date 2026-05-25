@@ -133,6 +133,7 @@ blacklist = [
 
 [tool.uv]
 package = true
+universal = true
 
 [tool.ruff.lint]
 ignore = ["E402"]
