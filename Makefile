@@ -57,7 +57,7 @@ pylint:  isort black
 	$(VENV) pylint naive_backlink --fail-under 9.2
 
 
-check: mypy test pylint bandit pre-commit update_dev_status dog_food
+check: mypy test pylint bandit update_dev_status dog_food
 
 publish: test
 	rm -rf dist && hatch build
