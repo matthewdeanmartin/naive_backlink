@@ -3,7 +3,7 @@ name = "naive_backlink"
 version = "0.1.0"
 description = "A naive backlink checker for non-cryptographic identity linking."
 authors = [{ name = "Matthew D. Martin", email = "matthewdeanmartin@users.noreply.github.com" }]
-requires-python = ">=3.8"
+requires-python = ">=3.9"
 dependencies = [
     "httpx",
     "beautifulsoup4",
@@ -88,7 +88,7 @@ dev = [
     "linkcheckmd>=1.4.0; python_version >= '3.8'",
     "codespell>=2.2.6; python_version >= '3.8'",
     "pyenchant>=3.2.2; python_version >= '3.8'",
-    "keepachangelog-manager-fork>=6.1.1,<7",
+    "keepachangelog-manager-fork[all]>=6.5.0",
 ]
 
 #[project.optional-dependencies]
