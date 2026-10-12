@@ -9,4 +9,4 @@ from naive_backlink.models import EvidenceRecord, Result
 
 # The __all__ variable defines the public API of the package.
 # When a user writes `from naive_backlink import *`, only these names will be imported.
-__all__ = ["crawl_and_score", "EvidenceRecord", "Result", "__version__"]
+__all__ = ["EvidenceRecord", "Result", "__version__", "crawl_and_score"]

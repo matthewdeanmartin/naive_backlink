@@ -15,13 +15,14 @@ Centralized behaviors (in link_logic.py):
 - Backlink detection (including rel="me" classification)
 - Evidence construction
 """
+
 from __future__ import annotations
 
 import asyncio
 import logging
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Any, Deque, Dict, List, Set
+from typing import Any
 from urllib.parse import urlparse
 
 import httpx2
@@ -94,29 +95,29 @@ class Crawler:
     """
 
     origin_url: str
-    config: Dict[str, Any]
-    seed_urls: List[str] | None = None
+    config: dict[str, Any]
+    seed_urls: list[str] | None = None
 
     # Internal state
-    queue: Deque[tuple[str, int]] = field(default_factory=deque)
-    visited_urls: Set[str] = field(default_factory=set)
-    evidence_producing_urls: Set[str] = field(default_factory=set)
-    evidence: List[EvidenceRecord] = field(default_factory=list)
-    errors: List[str] = field(default_factory=list)
+    queue: deque[tuple[str, int]] = field(default_factory=deque)
+    visited_urls: set[str] = field(default_factory=set)
+    evidence_producing_urls: set[str] = field(default_factory=set)
+    evidence: list[EvidenceRecord] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
 
     # second-degree tracking
-    parent: Dict[str, str] = field(default_factory=dict)  # neighbor C -> pivot B
-    pivot_has_backlink_to_origin: Set[str] = field(
+    parent: dict[str, str] = field(default_factory=dict)  # neighbor C -> pivot B
+    pivot_has_backlink_to_origin: set[str] = field(
         default_factory=set
     )  # B that link to A
-    pivot_outlinked: Dict[str, Set[str]] = field(default_factory=dict)  # B -> {C}
+    pivot_outlinked: dict[str, set[str]] = field(default_factory=dict)  # B -> {C}
 
     # HTTP client + derived
     _client: httpx2.AsyncClient = field(init=False, repr=False)
     normalized_origin_url: str = field(init=False)
     _cache: FileCache | None = field(default=None, init=False, repr=False)
 
-    async def __aenter__(self) -> "Crawler":
+    async def __aenter__(self) -> Crawler:
         headers = {
             "User-Agent": self.config.get(
                 "user_agent",
@@ -400,12 +401,12 @@ class Crawler:
         # Scheduler state
         max_global = int(self.config.get("max_global_concurrency", 16))
         domain_sems: dict[str, asyncio.Semaphore] = {}
-        waiting_by_domain: dict[str, Deque[tuple[str, int]]] = {}
+        waiting_by_domain: dict[str, deque[tuple[str, int]]] = {}
         in_flight: set[asyncio.Task] = set()
 
         # De-dup helpers
-        self._scheduled_urls: Set[str] = set()
-        self._queued_urls: Set[tuple[str, int]] = set()
+        self._scheduled_urls: set[str] = set()
+        self._queued_urls: set[tuple[str, int]] = set()
         for item in list(self.queue):
             self._queued_urls.add(item)
 
@@ -520,6 +521,6 @@ class Crawler:
                     t.cancel()
                 await asyncio.gather(*in_flight, return_exceptions=True)
 
-    def get_results(self) -> tuple[List[EvidenceRecord], List[str]]:
+    def get_results(self) -> tuple[list[EvidenceRecord], list[str]]:
         """Return accumulated evidence and errors."""
         return self.evidence, self.errors

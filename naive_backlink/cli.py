@@ -8,10 +8,11 @@ import asyncio  # Import the asyncio library
 import json
 import logging
 import sys
+from collections.abc import Sequence
 from dataclasses import asdict, is_dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import IO, Any, Sequence, Set
+from typing import IO, Any
 
 from naive_backlink import __version__
 from naive_backlink.api import crawl_and_score
@@ -57,13 +58,13 @@ def _json_default(o: Any) -> Any:
 
 def _build_link_graph_inputs(
     result: Result,
-) -> tuple[str | None, Set[str], dict[str, list[str]]]:
+) -> tuple[str | None, set[str], dict[str, list[str]]]:
     origin = None
     if result.evidence:
         # all evidence shares same origin URL in this model
         origin = result.evidence[0].source.url
 
-    direct: Set[str] = set()
+    direct: set[str] = set()
     edges: dict[str, list[str]] = {}
 
     for ev in result.evidence:
@@ -283,7 +284,7 @@ async def async_main(
     result = await crawl_and_score(**api_kwargs)  # type: ignore
     out_path = Path(args.json_output)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    with out_path.open("w", encoding="utf-8") as f:
+    with out_path.open("w", encoding="utf-8") as f:  # noqa: ASYNC230 - one-shot report write at exit
         json.dump(result, f, default=_json_default, indent=2)
     print(f"Full evidence report written to {args.json_output}", file=stdout)
     return 0

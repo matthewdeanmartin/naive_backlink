@@ -4,10 +4,10 @@ from __future__ import annotations
 import pytest
 from bs4 import BeautifulSoup
 
-from naive_backlink.link_logic import _netloc  # private helper
 from naive_backlink.link_logic import (  # private helper; exercised for policy behavior; private but deterministic enough for fallback tests
     LogicConfig,
     _is_same_domain_blocked,
+    _netloc,  # private helper
     _registrable_domain_or,
     classify_backlink,
     detect_backlink_element,

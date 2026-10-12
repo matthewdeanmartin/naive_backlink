@@ -1,11 +1,11 @@
 """Metadata for naive_backlink."""
 
 __all__ = [
+    "__credits__",
+    "__description__",
+    "__requires_python__",
     "__title__",
     "__version__",
-    "__description__",
-    "__credits__",
-    "__requires_python__",
 ]
 
 __title__ = "naive_backlink"

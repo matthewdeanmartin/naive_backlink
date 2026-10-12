@@ -2,7 +2,8 @@
 # Presentation-only utilities for CLI output.
 from __future__ import annotations
 
-from typing import IO, Iterable
+from collections.abc import Iterable
+from typing import IO
 
 from naive_backlink.models import Result
 

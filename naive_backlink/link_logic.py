@@ -4,8 +4,9 @@ from __future__ import annotations
 import fnmatch
 import logging  # Added logging
 import os
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable, List, Literal
+from typing import Literal
 from urllib.parse import urljoin, urlparse
 
 import tldextract  # optional dependency
@@ -112,7 +113,7 @@ def is_probably_html_url(u: str) -> bool:
     return True
 
 
-def _rel_list(tag: Tag) -> List[str]:
+def _rel_list(tag: Tag) -> list[str]:
     rel = tag.get("rel", None)
     if not rel:
         return []
@@ -146,14 +147,14 @@ class LogicConfig:
     """Updated LogicConfig to hold new policy settings."""
 
     max_outlinks: int
-    trusted_domains: List[str]
+    trusted_domains: list[str]
     same_domain_policy: SameDomainPolicy = "no-self-domain"
     # Optional: if True and tldextract is installed, use registrable domain to
     # decide subdomain relationships; otherwise fall back to naive suffix match.
     use_registrable_domain: bool = False
     # Lists
-    blacklist_patterns: List[str] | None = None
-    whitelist_patterns: List[str] | None = None
+    blacklist_patterns: list[str] | None = None
+    whitelist_patterns: list[str] | None = None
     # Modes
     only_whitelist: bool = False
 
@@ -318,7 +319,7 @@ def _registrable_domain_or(host: str, fallback_to_host: bool = True) -> str:
     except Exception:
         pass  # no qa # nosec
     if fallback_to_host:
-        return host[4:] if host.startswith("www.") else host
+        return host.removeprefix("www.")
     return host
 
 
@@ -349,7 +350,7 @@ def _is_same_domain_blocked(candidate: str, origin: str, cfg: LogicConfig) -> bo
 # ---------- Link extraction & filtering ----------
 
 
-def extract_href_elements(soup: BeautifulSoup) -> List[Tag]:
+def extract_href_elements(soup: BeautifulSoup) -> list[Tag]:
     """
     Return all elements with href among the set {<a>, <link>}.
     This supports Mastodon and other sites that expose identity via <link>.
@@ -368,14 +369,14 @@ def queue_candidates_from_origin(
     cfg: LogicConfig,
     already_queued: Iterable[str],
     visited: Iterable[str],
-) -> List[str]:
+) -> list[str]:
     """
     From the origin page, choose outbound candidate URLs to crawl next hop.
     Considers both <a href> and <link href>.
 
     Applies blacklist and (if enabled) whitelist logic.
     """
-    out: List[str] = []
+    out: list[str] = []
     # origin_domain = urlparse(origin_url).netloc
 
     queued_set = set(already_queued)
@@ -437,7 +438,7 @@ def queue_candidates_from_pivot(
     cfg: LogicConfig,
     already_queued: Iterable[str],
     visited: Iterable[str],
-) -> List[str]:
+) -> list[str]:
     """
     Select pivot→neighbor candidates (B → C) from a non-origin page.
     Constraints:
@@ -450,7 +451,7 @@ def queue_candidates_from_pivot(
 
     Applies blacklist and (if enabled) whitelist logic.
     """
-    out: List[str] = []
+    out: list[str] = []
     queued_set = set(already_queued)
     visited_set = set(visited)
     origin_host = _netloc(origin_url)

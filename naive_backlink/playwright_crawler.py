@@ -23,19 +23,20 @@ Config keys consumed:
   - blacklist: list[str]
   ...
 """
+
 from __future__ import annotations
 
 import logging
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Any, Deque, Dict, List, Set
+from typing import Any
 
 from bs4 import BeautifulSoup
 from playwright.async_api import Browser, Page, Playwright, async_playwright
 
-from naive_backlink.link_logic import _rel_list  # Import for rel="me" check
 from naive_backlink.link_logic import (
     LogicConfig,
+    _rel_list,  # Import for rel="me" check
     detect_backlink_element,
     extract_href_elements,
     is_blacklisted,
@@ -60,20 +61,20 @@ class Crawler:
     """
 
     origin_url: str
-    config: Dict[str, Any]
-    seed_urls: List[str] | None = None
+    config: dict[str, Any]
+    seed_urls: list[str] | None = None
 
     # Internal BFS state
-    queue: Deque[tuple[str, int]] = field(default_factory=deque)
-    visited_urls: Set[str] = field(default_factory=set)
-    evidence_producing_urls: Set[str] = field(default_factory=set)
-    evidence: List[EvidenceRecord] = field(default_factory=list)
-    errors: List[str] = field(default_factory=list)
+    queue: deque[tuple[str, int]] = field(default_factory=deque)
+    visited_urls: set[str] = field(default_factory=set)
+    evidence_producing_urls: set[str] = field(default_factory=set)
+    evidence: list[EvidenceRecord] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
 
     # second-degree tracking
-    parent: Dict[str, str] = field(default_factory=dict)  # C -> B
-    pivot_has_backlink_to_origin: Set[str] = field(default_factory=set)  # B with B→A
-    pivot_outlinked: Dict[str, Set[str]] = field(default_factory=dict)  # B -> {C}
+    parent: dict[str, str] = field(default_factory=dict)  # C -> B
+    pivot_has_backlink_to_origin: set[str] = field(default_factory=set)  # B with B→A
+    pivot_outlinked: dict[str, set[str]] = field(default_factory=dict)  # B -> {C}
 
     # Playwright state
     _playwright: Playwright = field(init=False, repr=False)
@@ -83,7 +84,7 @@ class Crawler:
     # Derived
     normalized_origin_url: str = field(init=False)
 
-    async def __aenter__(self) -> "Crawler":
+    async def __aenter__(self) -> Crawler:
         """Starts Playwright, launches Chromium, creates a page, sets UA, initializes queue."""
         log.info("Starting headless browser session...")
         self._playwright = await async_playwright().start()
@@ -359,6 +360,6 @@ class Crawler:
             len(self.errors),
         )
 
-    def get_results(self) -> tuple[List[EvidenceRecord], List[str]]:
+    def get_results(self) -> tuple[list[EvidenceRecord], list[str]]:
         """Expose collected evidence and errors."""
         return self.evidence, self.errors

@@ -5,11 +5,13 @@ Centralized configuration management.
 Handles loading defaults, merging in settings from pyproject.toml,
 and applying runtime overrides.
 """
+
 from __future__ import annotations
 
 import logging
+from collections.abc import MutableMapping
 from pathlib import Path
-from typing import Any, MutableMapping
+from typing import Any
 
 try:
     import tomli
@@ -83,7 +85,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "stackoverflow.co/*",
         "stackoverflow.blog*",
         "https://github.githubassets.com",
-        "https://github.githubassets.com/*" "api.stackexchange.com",
+        "https://github.githubassets.com/*api.stackexchange.com",
         "data.stackexchange.com",
         "stackoverflow.com/users/signup*",
         # noise?

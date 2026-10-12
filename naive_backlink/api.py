@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import logging
-from typing import List
 
 from naive_backlink.config import load_config  # Import the new config loader
 from naive_backlink.crawler import Crawler as HttpxCrawler
@@ -18,7 +17,7 @@ log = logging.getLogger(__name__)
 async def crawl_and_score(
     origin_url: str,
     *,
-    seed_urls: List[str] | None = None,
+    seed_urls: list[str] | None = None,
     trusted_overrides: list[str] | None = None,
     blacklist_overrides: list[str] | None = None,
     whitelist_overrides: list[str] | None = None,

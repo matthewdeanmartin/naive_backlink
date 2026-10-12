@@ -6,13 +6,14 @@ File-backed HTTP response cache.
 - Location: default is a visible folder in CWD; optionally an OS-specific app cache dir via platformdirs.
 - Scope: only 200 OK HTML pages (text/html). No binary assets. No error pages by default.
 """
+
 from __future__ import annotations
 
 import dataclasses
 import logging
 import os
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import diskcache
 from platformdirs import user_cache_dir as _user_cache_dir
@@ -74,7 +75,7 @@ class FileCache:
     # ---- Introspection helpers ---------------------------------------------
 
     @property
-    def directory(self) -> Optional[str]:
+    def directory(self) -> str | None:
         """Returns the absolute cache directory path if available."""
         if self._cache is None or not self._cache.directory:
             return None
@@ -128,7 +129,7 @@ class FileCache:
 
     # ---- Public API ---------------------------------------------------------
 
-    def get(self, url: str) -> Optional[dict[str, Any]]:
+    def get(self, url: str) -> dict[str, Any] | None:
 
         if self._cache is None or not self._cache.directory:
             log.warning("Cache disabled")

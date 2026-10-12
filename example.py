@@ -74,11 +74,10 @@ async def main():
                     # Fallback if notes format is unexpected
                     print(f"Could not parse pivot from: {evidence.notes}")
 
-
         # Now, print the graph in a readable tree format.
         sorted_direct_links = sorted(list(direct_links))
         for i, link in enumerate(sorted_direct_links):
-            is_last_direct = (i == len(sorted_direct_links) - 1)
+            is_last_direct = i == len(sorted_direct_links) - 1
             # Use different box-drawing characters for the last item in a list.
             direct_prefix = "└──" if is_last_direct else "├──"
             indirect_prefix = "    " if is_last_direct else "│   "
@@ -89,10 +88,9 @@ async def main():
             if link in indirect_links:
                 sorted_indirect = sorted(indirect_links[link])
                 for j, indirect_link in enumerate(sorted_indirect):
-                    is_last_indirect = (j == len(sorted_indirect) - 1)
+                    is_last_indirect = j == len(sorted_indirect) - 1
                     end_prefix = "└──" if is_last_indirect else "├──"
                     print(f"{indirect_prefix}{end_prefix} {indirect_link}")
-
 
     except Exception as e:
         print(f"\n[!] An unexpected error occurred: {e}")
