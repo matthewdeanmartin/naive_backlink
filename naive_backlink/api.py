@@ -68,12 +68,12 @@ async def crawl_and_score(
         config["only_rel_me"] = only_rel_me
         log.info("Applied override - only_rel_me set to: %s", only_rel_me)
 
-    # Crawl for evidence, with fallback from httpx to Playwright
+    # Crawl for evidence, with fallback from httpx2 to Playwright
     evidence: list[EvidenceRecord] = []
     errors: list[str] = []
     try:
         # Stage 1: Attempt crawl with lightweight HTTP client
-        log.info("Step 1a: Crawling with lightweight HTTP client (httpx).")
+        log.info("Step 1a: Crawling with lightweight HTTP client (httpx2).")
         async with HttpxCrawler(origin_url, config, seed_urls=seed_urls) as crawler:
             await crawler.crawl()
             evidence, errors = crawler.get_results()
@@ -81,7 +81,7 @@ async def crawl_and_score(
         # Stage 2: If no evidence, fall back to full browser crawl
         if not evidence and config["use_playwright_as_fallback"]:
             log.warning(
-                "No evidence found with httpx. Falling back to full browser (Playwright)."
+                "No evidence found with httpx2. Falling back to full browser (Playwright)."
             )
             # Clear any errors from the first attempt before retrying
             errors.clear()

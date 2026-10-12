@@ -13,7 +13,7 @@
 # 2) IPv4 and IPv6 separately (to catch AAAA-timeout cases).
 # 3) TCP connect to host:80/443 to reveal which address family succeeds.
 # 4) Optional: dnspython direct queries (system default, 8.8.8.8, 1.1.1.1) if installed.
-# 5) Optional: DNS-over-HTTPS (DoH) to Cloudflare and Google if httpx or requests are installed.
+# 5) Optional: DNS-over-HTTPS (DoH) to Cloudflare and Google if httpx2 or requests are installed.
 # 6) Prints concise verdicts + remediation tips.
 #
 # Exit code is nonzero if all resolution/connect attempts fail.
@@ -39,7 +39,7 @@
 # HAVE_HTTPX = False
 # HAVE_REQUESTS = False
 # try:
-#     import httpx  # type: ignore
+#     import httpx2  # type: ignore
 #     HAVE_HTTPX = True
 # except Exception:
 #     try:
@@ -167,12 +167,12 @@
 #     Simple DoH query using GET (JSON), provider in {'cloudflare','google'}.
 #     """
 #     if not (HAVE_HTTPX or HAVE_REQUESTS):
-#         return {"available": False, "note": "httpx/requests not installed"}
+#         return {"available": False, "note": "httpx2/requests not installed"}
 #
 #     def fetch(url: str, params: dict, headers: dict) -> tuple[bool, dict | str]:
 #         try:
 #             if HAVE_HTTPX:
-#                 with httpx.Client(timeout=5.0) as client:
+#                 with httpx2.Client(timeout=5.0) as client:
 #                     r = client.get(url, params=params, headers=headers)
 #                     r.raise_for_status()
 #                     return True, r.json()

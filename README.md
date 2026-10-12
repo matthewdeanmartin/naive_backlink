@@ -107,3 +107,9 @@ backlinks.
   microformats.
 - [Sherlock](https://github.com/sherlock-project/sherlock/tree/master) Doesn't claim people with same user name are the
   same people, but you know you were suspecting it.
+
+## HTTPX2 migration verification (2026-10-04)
+
+Direct crawler/API clients use HTTPX2; test plugin is httpx2-pytest on Python >=3.10. All 78 tests pass on RC3 stable/pre and 3.14. Actual lxml 7.0.0b1 exercised experimentally. Browser installation/live crawling not certified; Python 3.9 metadata floor retained.
+
+Dependency locks upgraded and checked. Published dependency wheels only; no native builds or GitHub jobs. Application HTTPX2 objects remain separate from third-party HTTPX objects. Current HTTPX2 releases use the OS trust store. Experimental RC3 tests may require Pydantic prerelease wheels; stable support is reported separately. Changes local; human operators decide releases and upstream reports.

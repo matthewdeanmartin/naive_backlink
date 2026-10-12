@@ -14,6 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Migrate direct HTTP clients/tests/dependencies to HTTPX2; current releases use OS trust-store HTTPS verification.
+
+
 ## [0.1.0] - 2025-10-14
 
 ### Added

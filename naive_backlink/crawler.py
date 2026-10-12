@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 from typing import Any, Deque, Dict, List, Set
 from urllib.parse import urlparse
 
-import httpx
+import httpx2
 from bs4 import BeautifulSoup
 
 from naive_backlink.cache import CacheConfig, FileCache
@@ -75,7 +75,7 @@ def _domain_group(url: str, use_registrable: bool) -> str:
 @dataclass
 class Crawler:
     """
-    Crawl starting from an origin URL using httpx (no JS execution).
+    Crawl starting from an origin URL using httpx2 (no JS execution).
 
     Config keys consumed:
       - user_agent: str
@@ -112,7 +112,7 @@ class Crawler:
     pivot_outlinked: Dict[str, Set[str]] = field(default_factory=dict)  # B -> {C}
 
     # HTTP client + derived
-    _client: httpx.AsyncClient = field(init=False, repr=False)
+    _client: httpx2.AsyncClient = field(init=False, repr=False)
     normalized_origin_url: str = field(init=False)
     _cache: FileCache | None = field(default=None, init=False, repr=False)
 
@@ -134,7 +134,7 @@ class Crawler:
         )
         self._cache = FileCache(cc)
 
-        self._client = httpx.AsyncClient(
+        self._client = httpx2.AsyncClient(
             follow_redirects=True,
             timeout=self.config.get("timeout", 10.0),
             headers=headers,
@@ -152,14 +152,14 @@ class Crawler:
             # Start at the origin page
             self.queue.append((self.normalized_origin_url, 0))
 
-        log.info("httpx session initialized. Origin: %s", self.normalized_origin_url)
+        log.info("httpx2 session initialized. Origin: %s", self.normalized_origin_url)
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
         await self._client.aclose()
         if self._cache:
             self._cache.close()  # NEW
-        log.info("httpx session closed.")
+        log.info("httpx2 session closed.")
 
     async def _fetch_and_parse(self, url: str) -> BeautifulSoup | None:
         """
@@ -228,12 +228,12 @@ class Crawler:
 
             return BeautifulSoup(resp.text, "html.parser")
 
-        except httpx.HTTPStatusError as e:
+        except httpx2.HTTPStatusError as e:
             msg = f"HTTP error for {url}: {e}"
             log.error(msg)
             self.errors.append(msg)
             return None
-        except httpx.RequestError as e:
+        except httpx2.RequestError as e:
             msg = f"Network error fetching {url}: {e}"
             log.error(msg)
             self.errors.append(msg)
